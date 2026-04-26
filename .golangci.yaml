@@ -1,0 +1,48 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - misspell
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    revive:
+      rules:
+        - name: var-naming
+          disabled: false
+        # `exported` is too strict for internal/* — most methods only
+        # exist to satisfy the Value interface or the XML-RPC handler
+        # surface. Keep the rule disabled here; pkg/godevccu carries
+        # godoc comments by hand.
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: false
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - govet
+      - path: cmd/
+        linters:
+          - revive
+        text: "should have a package comment"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

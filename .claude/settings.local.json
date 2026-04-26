@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "Agent(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "NotebookEdit(*)",
+      "Skill(*)",
+      "TaskCreate(*)",
+      "TaskUpdate(*)",
+      "ToolSearch(*)",
+      "Bash(go version *)"
+    ],
+    "deny": []
+  }
+}
