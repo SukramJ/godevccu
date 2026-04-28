@@ -71,8 +71,20 @@ func New(stateMgr *state.Manager, rpc RPC) *Engine {
 	return e
 }
 
+// utf8BOM is the byte sequence that real CCU firmwares (verified
+// against an OpenCCU on 2026-04-28) treat as a poison pill: any
+// script body starting with this prefix is silently dropped and
+// runScript returns an empty result. We mirror that behaviour so
+// integration tests against godevccu catch accidental BOM injection
+// in the same way the production CCU would.
+const utf8BOM = "\xef\xbb\xbf"
+
 // Execute returns the result of running script.
 func (e *Engine) Execute(script string) Result {
+	if strings.HasPrefix(script, utf8BOM) {
+		// Mirror real-CCU behaviour: BOM-prefixed scripts → empty result.
+		return Result{Output: "", Success: true}
+	}
 	for _, p := range e.patterns {
 		if !p.re.MatchString(script) {
 			continue

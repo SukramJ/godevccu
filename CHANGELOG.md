@@ -9,6 +9,18 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added
+
+- **`deleteDevice` XML-RPC server-side handler** (`internal/ccu`): the XML-RPC
+  mux now exposes `deleteDevice(address, flags)` as a server-received method.
+  When called, the simulator removes the root device and all its channels from
+  the catalogue and pushes a `deleteDevices` callback to every registered
+  remote. The call is idempotent — an unknown address returns int `0` without
+  error, matching pydevccu semantics. The `flags` parameter is accepted for
+  wire compatibility (HomeMatic uses it for over-the-air deregistration bits)
+  but is currently ignored. This unblocks `gohomematic`'s
+  `DeviceCoordinator.UnpairDevice` integration tests.
+
 ## [0.1.0] — 2026-04-26
 
 Initial release. A standalone Go port of

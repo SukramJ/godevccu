@@ -72,3 +72,26 @@ func TestUnknownScriptReturnsEmpty(t *testing.T) {
 		t.Fatalf("expected empty success, got %+v", res)
 	}
 }
+
+// TestExecuteBOMPrefixedScriptReturnsEmpty mirrors the real-CCU
+// behaviour verified against an OpenCCU on 2026-04-28: scripts that
+// start with a UTF-8 BOM (0xEF 0xBB 0xBF) are silently dropped and
+// the runScript JSON-RPC method returns an empty result. Without this
+// guardrail in the simulator, accidental BOM injection on the
+// gohomematic side would only surface in production.
+func TestExecuteBOMPrefixedScriptReturnsEmpty(t *testing.T) {
+	st := state.New(hmconst.BackendModeOpenCCU, "TEST0001")
+	e := rega.New(st, nil)
+	// Without BOM the same script returns "hello".
+	if got := e.Execute(`Write("hello")`).Output; got != "hello" {
+		t.Fatalf("baseline (no BOM) output = %q, want hello", got)
+	}
+	// With BOM the engine must return empty.
+	res := e.Execute("\xef\xbb\xbf" + `Write("hello")`)
+	if !res.Success {
+		t.Fatalf("BOM script must succeed (empty result), got error %q", res.Error)
+	}
+	if res.Output != "" {
+		t.Fatalf("BOM-prefixed script output = %q, want empty (real CCU drops BOM scripts)", res.Output)
+	}
+}

@@ -56,6 +56,10 @@ type RPCFunctions struct {
 	paramsetCompiled map[paramsetKey]map[string]any
 	paramsetDirty    map[paramsetKey]struct{}
 
+	// LINK paramset values: keyed by (sender, receiver), both upper-case.
+	// Populated by AddLink; dropped by RemoveLink.
+	linkParamsets map[linkKey]map[string]any
+
 	// callback wiring
 	remotes           map[string]*xmlrpc.Client
 	paramsetCallbacks []EventCallback
@@ -69,6 +73,13 @@ type RPCFunctions struct {
 type paramsetKey struct {
 	address string
 	kind    string
+}
+
+// linkKey is the composite key for a directed link between two channels.
+// Both fields are stored upper-case for case-insensitive comparison.
+type linkKey struct {
+	sender   string
+	receiver string
 }
 
 // Options is the constructor argument set for [NewRPCFunctions].
@@ -131,6 +142,7 @@ func NewRPCFunctions(opts Options) (*RPCFunctions, error) {
 		paramsetDefaults:   make(map[paramsetKey]map[string]any),
 		paramsetCompiled:   make(map[paramsetKey]map[string]any),
 		paramsetDirty:      make(map[paramsetKey]struct{}),
+		linkParamsets:      make(map[linkKey]map[string]any),
 		remotes:            make(map[string]*xmlrpc.Client),
 	}
 
@@ -255,6 +267,73 @@ func (r *RPCFunctions) AddDevices(ctx context.Context, devices []string) error {
 		}
 	}
 	return nil
+}
+
+// DeleteDevice removes all device entries whose root address matches addr
+// (i.e. the root device itself and every channel belonging to it) and
+// pushes a deleteDevices callback to all registered remotes.
+//
+// The flags parameter is accepted for wire compatibility but is otherwise
+// ignored — godevccu does not model the RX-flag bits that the real CCU uses
+// to decide whether to send an over-the-air deregistration. The call is
+// idempotent: an unknown address returns success without pushing a callback.
+func (r *RPCFunctions) DeleteDevice(ctx context.Context, address string, _ int) {
+	addrUp := strings.ToUpper(address)
+
+	r.mu.Lock()
+	// Collect every entry (root + channels) belonging to this root address.
+	// A channel belongs to the root when its own address starts with
+	// "<rootAddr>:" (case-insensitive).
+	prefix := addrUp + ":"
+	addresses := make([]string, 0)
+	filtered := r.devices[:0]
+	for _, d := range r.devices {
+		dAddr, _ := d[hmconst.AttrAddress].(string)
+		dAddrUp := strings.ToUpper(dAddr)
+		if dAddrUp == addrUp || strings.HasPrefix(dAddrUp, prefix) {
+			if dAddr != "" {
+				addresses = append(addresses, dAddr)
+				r.clearAddressCachesLocked(dAddr)
+			}
+		} else {
+			filtered = append(filtered, d)
+		}
+	}
+	r.devices = filtered
+
+	// Also remove from the activeDevices / supportedDevices index when the
+	// root address matches a supported device type root.
+	for typeName, rootAddr := range r.supportedDevices {
+		if strings.ToUpper(rootAddr) == addrUp {
+			delete(r.activeDevices, typeName)
+			delete(r.supportedDevices, typeName)
+			break
+		}
+	}
+
+	if len(addresses) == 0 {
+		// Unknown address — idempotent success, no callback.
+		r.mu.Unlock()
+		return
+	}
+
+	remotes := make(map[string]*xmlrpc.Client, len(r.remotes))
+	for k, v := range r.remotes {
+		remotes[k] = v
+	}
+	r.mu.Unlock()
+
+	// Push deleteDevices to every registered callback receiver after the
+	// state mutation is complete.
+	for ifID, client := range remotes {
+		params := []xmlrpc.Value{
+			xmlrpc.StringValue(ifID),
+			xmlrpc.FromAny(any(addresses)),
+		}
+		if _, err := client.Call(ctx, "deleteDevices", params); err != nil {
+			r.logger.Debug("ccu: deleteDevices push failed (deleteDevice)", "interface", ifID, "err", err)
+		}
+	}
 }
 
 // RemoveDevices removes the named device types (or all when names is
@@ -409,10 +488,24 @@ func (r *RPCFunctions) GetParamsetDescription(address, paramsetType string) (map
 	return ps, nil
 }
 
-// GetParamset returns the current values of paramset (defaults + overrides).
+// GetParamset returns the current values of a paramset.
+//
+// When paramsetKey is "VALUES" or "MASTER" the standard per-channel store is
+// consulted. When paramsetKey is a channel address (the LINK calling convention
+// used by gohomematic's CcuBackend.GetLinkParamset), the LINK paramset for
+// that (address, peer) pair is returned — an empty map when no link has been
+// registered via AddLink.
 func (r *RPCFunctions) GetParamset(address, paramsetKey string) (map[string]any, error) {
+	// Detect the LINK peer-address form: anything that is not one of the
+	// three known literal keys is treated as a peer channel address.
 	if paramsetKey != hmconst.ParamsetAttrMaster && paramsetKey != hmconst.ParamsetAttrValues {
-		return nil, fmt.Errorf("%w: unsupported paramset key %q", ErrRPC, paramsetKey)
+		if paramsetKey == hmconst.ParamsetAttrLink {
+			// Caller passed the literal "LINK" key — not the peer-address form.
+			// Return defaults from the description.
+			return r.getLinkParamsetDefaults(address)
+		}
+		// Treat paramsetKey as a peer channel address (LINK pair form).
+		return r.GetLinkParamset(address, paramsetKey)
 	}
 	addrUp := strings.ToUpper(address)
 	r.mu.Lock()
@@ -456,6 +549,43 @@ func (r *RPCFunctions) GetParamset(address, paramsetKey string) (map[string]any,
 	return result, nil
 }
 
+// GetLinkParamset returns the LINK paramset values for the (sender, peer) pair.
+// Returns an empty map when no link entry exists (matches real CCU behaviour
+// for a channel with no links configured).
+func (r *RPCFunctions) GetLinkParamset(senderAddress, peerAddress string) (map[string]any, error) {
+	lk := linkKey{
+		sender:   strings.ToUpper(senderAddress),
+		receiver: strings.ToUpper(peerAddress),
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if vals, ok := r.linkParamsets[lk]; ok {
+		return cloneStringMap(vals), nil
+	}
+	return map[string]any{}, nil
+}
+
+// getLinkParamsetDefaults returns the default values built from the LINK
+// paramset description for address. Holds the mutex on entry.
+func (r *RPCFunctions) getLinkParamsetDefaults(address string) (map[string]any, error) {
+	addrUp := strings.ToUpper(address)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	desc, ok := r.paramsetDescByAddr[addrUp]
+	if !ok {
+		desc, ok = r.paramsetDescByAddr[address]
+	}
+	if !ok {
+		return nil, fmt.Errorf("%w: paramset description for %q not found", ErrRPC, address)
+	}
+	ps, ok := desc[hmconst.ParamsetAttrLink].(map[string]any)
+	if !ok {
+		// No LINK description for this channel — return empty map.
+		return map[string]any{}, nil
+	}
+	return buildDefaults(ps), nil
+}
+
 // GetValue returns the current value for (address, valueKey).
 func (r *RPCFunctions) GetValue(address, valueKey string) (any, error) {
 	values, err := r.GetParamset(address, hmconst.ParamsetAttrValues)
@@ -482,7 +612,18 @@ func (r *RPCFunctions) SetValue(address, valueKey string, value any, force bool)
 
 // PutParamset writes one or more values into the paramset and fires the
 // computed follow-up events.
+//
+// When paramsetKey is a channel address (the LINK calling convention used by
+// gohomematic's CcuBackend.PutLinkParamset), the values are stored in the LINK
+// paramset for the (address, peerAddress) pair. The link must have been
+// registered via AddLink first; values are accepted even when the entry does not
+// yet exist so that callers can create a link implicitly.
 func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[string]any, force bool) error {
+	// Detect LINK peer-address form.
+	if paramsetKey != hmconst.ParamsetAttrMaster && paramsetKey != hmconst.ParamsetAttrValues &&
+		paramsetKey != hmconst.ParamsetAttrLink {
+		return r.PutLinkParamset(address, paramsetKey, paramset)
+	}
 	addrUp := strings.ToUpper(address)
 	r.mu.Lock()
 	desc, ok := r.paramsetDescByAddr[addrUp]
@@ -702,6 +843,27 @@ func (r *RPCFunctions) ClientServerInitialized(interfaceID string) bool {
 	return ok
 }
 
+// PutLinkParamset stores LINK paramset values for the (sender, peer) pair.
+// It is idempotent — writing to a non-existent link entry creates it, and
+// writing to an existing entry merges the provided values.
+func (r *RPCFunctions) PutLinkParamset(senderAddress, peerAddress string, paramset map[string]any) error {
+	lk := linkKey{
+		sender:   strings.ToUpper(senderAddress),
+		receiver: strings.ToUpper(peerAddress),
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	existing, ok := r.linkParamsets[lk]
+	if !ok {
+		existing = make(map[string]any, len(paramset))
+		r.linkParamsets[lk] = existing
+	}
+	for k, v := range paramset {
+		existing[k] = v
+	}
+	return nil
+}
+
 // SetMetadata, GetMetadata, link helpers mirror the Python stubs.
 
 // GetMetadata returns the requested metadata field.
@@ -734,11 +896,85 @@ func (r *RPCFunctions) GetMetadata(objectID, dataID string) (any, error) {
 // SetMetadata accepts and discards metadata writes.
 func (r *RPCFunctions) SetMetadata(_, _ string, _ any) bool { return true }
 
-// AddLink and friends are no-op stubs matching pydevccu.
-func (r *RPCFunctions) AddLink(_, _, _, _ string) bool { return true }
-func (r *RPCFunctions) RemoveLink(_, _ string) bool    { return true }
-func (r *RPCFunctions) GetLinkPeers(_ string) []string { return []string{} }
-func (r *RPCFunctions) GetLinks(_ string, _ int) []any { return []any{} }
+// AddLink records a link between sender and receiver and allocates a default
+// LINK paramset for the pair (built from the sender channel's LINK description,
+// if available). Calling AddLink for an already-registered pair is idempotent
+// and does not overwrite existing paramset values.
+func (r *RPCFunctions) AddLink(senderAddress, receiverAddress, _, _ string) bool {
+	lk := linkKey{
+		sender:   strings.ToUpper(senderAddress),
+		receiver: strings.ToUpper(receiverAddress),
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, already := r.linkParamsets[lk]; already {
+		// Idempotent: already present, nothing to do.
+		return true
+	}
+	// Build default LINK paramset from the sender channel's LINK description.
+	defaults := make(map[string]any)
+	if desc, ok := r.paramsetDescByAddr[lk.sender]; ok {
+		if linkDesc, ok := desc[hmconst.ParamsetAttrLink].(map[string]any); ok {
+			defaults = buildDefaults(linkDesc)
+		}
+	}
+	r.linkParamsets[lk] = defaults
+	return true
+}
+
+// RemoveLink drops the link paramset for the (sender, receiver) pair.
+// Calling RemoveLink for an unknown pair is a no-error no-op (idempotent).
+func (r *RPCFunctions) RemoveLink(senderAddress, receiverAddress string) bool {
+	lk := linkKey{
+		sender:   strings.ToUpper(senderAddress),
+		receiver: strings.ToUpper(receiverAddress),
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.linkParamsets, lk)
+	return true
+}
+
+// GetLinkPeers returns the list of peer addresses for all links whose sender
+// matches the given channel address.
+func (r *RPCFunctions) GetLinkPeers(channelAddress string) []string {
+	addrUp := strings.ToUpper(channelAddress)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	peers := make([]string, 0)
+	for lk := range r.linkParamsets {
+		if lk.sender == addrUp {
+			peers = append(peers, lk.receiver)
+		}
+	}
+	return peers
+}
+
+// GetLinks returns a list of link descriptor maps for the given channel address.
+// When channelAddress is empty all links are returned. Flags are accepted but
+// currently ignored (mirrors the real CCU behaviour for the simulator context).
+func (r *RPCFunctions) GetLinks(channelAddress string, _ int) []any {
+	addrUp := strings.ToUpper(channelAddress)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]any, 0)
+	for lk, vals := range r.linkParamsets {
+		if addrUp != "" && lk.sender != addrUp {
+			continue
+		}
+		desc := map[string]any{
+			"SENDER":      lk.sender,
+			"RECEIVER":    lk.receiver,
+			"NAME":        "",
+			"DESCRIPTION": "",
+		}
+		for k, v := range vals {
+			desc[k] = v
+		}
+		out = append(out, desc)
+	}
+	return out
+}
 func (r *RPCFunctions) GetInstallMode() int            { return 0 }
 func (r *RPCFunctions) SetInstallMode(_ bool, _ int, _ int, _ string) bool {
 	return true

@@ -427,6 +427,21 @@ func (s *Server) registerMethods() {
 		}
 		return xmlrpc.BoolValue(rpc.ClientServerInitialized(ifID)), nil
 	})
+
+	mux.Handle("deleteDevice", func(ctx context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
+		if len(params) < 1 {
+			return nil, fmt.Errorf("deleteDevice: address required")
+		}
+		address, _ := xmlrpc.AsString(params[0])
+		flags := 0
+		if len(params) >= 2 {
+			flags, _ = xmlrpc.AsInt(params[1])
+		}
+		// DeleteDevice is idempotent and never returns an error to the caller.
+		// The flags parameter is accepted for wire compatibility; see RPCFunctions.DeleteDevice.
+		rpc.DeleteDevice(ctx, address, flags)
+		return xmlrpc.IntValue(0), nil
+	})
 }
 
 // faultFromErr translates an internal error into an XML-RPC fault.
