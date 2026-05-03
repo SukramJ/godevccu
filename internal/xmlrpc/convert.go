@@ -62,6 +62,19 @@ func FromAny(v any) Value {
 			return IntValue(int32(x))
 		}
 		return DoubleValue(x)
+	case [][]any:
+		// Nested slice (e.g. GetServiceMessages returns [][]any). Each inner
+		// slice becomes an ArrayValue so the wire carries properly nested
+		// <array> elements rather than a fmt.Sprintf fallback string.
+		out := make(ArrayValue, len(x))
+		for i, inner := range x {
+			innerArr := make(ArrayValue, len(inner))
+			for j, e := range inner {
+				innerArr[j] = FromAny(e)
+			}
+			out[i] = innerArr
+		}
+		return out
 	case []any:
 		out := make(ArrayValue, len(x))
 		for i, e := range x {
