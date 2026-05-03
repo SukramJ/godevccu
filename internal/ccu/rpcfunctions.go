@@ -975,7 +975,7 @@ func (r *RPCFunctions) GetLinks(channelAddress string, _ int) []any {
 	}
 	return out
 }
-func (r *RPCFunctions) GetInstallMode() int            { return 0 }
+func (r *RPCFunctions) GetInstallMode() int { return 0 }
 func (r *RPCFunctions) SetInstallMode(_ bool, _ int, _ int, _ string) bool {
 	return true
 }
