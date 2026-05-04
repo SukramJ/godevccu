@@ -9,6 +9,8 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-05-03
+
 ### Added
 
 - **`deleteDevice` XML-RPC server-side handler** (`internal/ccu`): the XML-RPC
@@ -93,5 +95,6 @@ Initial release. A standalone Go port of
   and `3.87.1.20250130` in CCU/OpenCCU mode — identical to upstream
   pydevccu so clients that branch on the prefix keep working.
 
-[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/SukramJ/godevccu/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/SukramJ/godevccu/releases/tag/v0.1.0
