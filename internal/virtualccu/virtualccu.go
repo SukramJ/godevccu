@@ -59,6 +59,12 @@ type Config struct {
 	EnableLogic   bool
 	LogicConfig   devicelogic.Config
 	Logger        *slog.Logger
+	// OnSetValue is forwarded to [ccu.Options.OnSetValue]. The hook
+	// is invoked synchronously after every successful PutParamset
+	// write. Tests use it to model CCU-side echo events for ACTION
+	// DPs (e.g. AUTO_MODE→CONTROL_MODE on RF thermostats) by
+	// re-entering through FireEvent. Nil disables the hook.
+	OnSetValue func(address, valueKey string, value any)
 }
 
 // Defaults returns a Config with the canonical HomeMatic ports
@@ -212,6 +218,7 @@ func (v *VirtualCCU) Start() error {
 		Persistence: v.cfg.Persistence,
 		Version:     version,
 		Logger:      v.logger,
+		OnSetValue:  v.cfg.OnSetValue,
 	})
 	if err != nil {
 		return err

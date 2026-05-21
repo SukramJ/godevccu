@@ -50,7 +50,7 @@ func New(stateMgr *state.Manager, rpc RPC) *Engine {
 	e.patterns = []patternHandler{
 		{regexp.MustCompile(`(?is)system\.Exec.*cat.*/VERSION`), e.handleBackendInfo},
 		{regexp.MustCompile(`(?is)grep.*VERSION.*grep.*PRODUCT`), e.handleBackendInfo},
-		{regexp.MustCompile(`(?i)name:\s*get_serial\.fn`), e.handleGetSerial},
+		{regexp.MustCompile(`(?i)\bget_serial(\.fn)?\b`), e.handleGetSerial},
 		{regexp.MustCompile(`(?i)system\.GetVar\s*\(\s*["']?SERIALNO["']?\s*\)`), e.handleGetSerial},
 		{regexp.MustCompile(`(?i)name:\s*fetch_all_device_data\.fn`), e.handleFetchDeviceData},
 		{regexp.MustCompile(`(?is)foreach\s*\(\s*\w+\s*,\s*dom\.GetObject\s*\(\s*ID_DATAPOINTS`), e.handleFetchDeviceData},
@@ -110,7 +110,7 @@ func (e *Engine) handleBackendInfo(_ string) string {
 }
 
 func (e *Engine) handleGetSerial(_ string) string {
-	return mustJSON(e.state.Serial())
+	return mustJSON(map[string]any{"serial": e.state.Serial()})
 }
 
 var (

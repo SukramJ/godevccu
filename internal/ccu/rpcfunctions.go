@@ -64,6 +64,12 @@ type RPCFunctions struct {
 	remotes           map[string]*xmlrpc.Client
 	paramsetCallbacks []EventCallback
 
+	// onSetValue is invoked synchronously after every successful
+	// PutParamset paramset write. Used by tests to script CCU-side
+	// echo events for ACTION DPs (the AUTO_MODE→CONTROL_MODE pair on
+	// RF thermostats, for example). Nil = no hook.
+	onSetValue func(address, valueKey string, value any)
+
 	knownDevices []map[string]any
 
 	// runtime flag toggled by the surrounding ServerThread.
@@ -102,6 +108,17 @@ type Options struct {
 	InterfaceID string
 	// Logger sinks structured log output. Defaults to slog.Default().
 	Logger *slog.Logger
+	// OnSetValue is invoked after every successful SetValue /
+	// PutParamset for each parameter that landed in the paramset
+	// store. Tests use the hook to simulate CCU-side echo events on
+	// ACTION parameters (e.g. an RF-thermostat AUTO_MODE-action
+	// write triggers a CONTROL_MODE=AUTO-MODE sensor event) by
+	// calling FireEvent from inside the hook.
+	//
+	// The callback runs synchronously on the writer's goroutine —
+	// long-running work must be dispatched to a separate goroutine
+	// inside the hook. Nil disables the hook.
+	OnSetValue func(address, valueKey string, value any)
 }
 
 // NewRPCFunctions constructs the simulator. The embedded JSON catalogue
@@ -144,6 +161,7 @@ func NewRPCFunctions(opts Options) (*RPCFunctions, error) {
 		paramsetDirty:      make(map[paramsetKey]struct{}),
 		linkParamsets:      make(map[linkKey]map[string]any),
 		remotes:            make(map[string]*xmlrpc.Client),
+		onSetValue:         opts.OnSetValue,
 	}
 
 	if _, err := rpc.loadDevices(opts.Devices); err != nil {
@@ -604,6 +622,16 @@ func (r *RPCFunctions) GetValue(address, valueKey string) (any, error) {
 func (r *RPCFunctions) SetValue(address, valueKey string, value any, force bool) error {
 	if converter.IsConvertable(valueKey) {
 		s, _ := value.(string)
+		// Surface the raw combined-parameter write to OnSetValue
+		// before expansion so callers can observe the wire-shape
+		// gohomematic actually emitted (a real CCU receives the
+		// same string and decomposes it internally).
+		r.mu.Lock()
+		hook := r.onSetValue
+		r.mu.Unlock()
+		if hook != nil {
+			hook(address, valueKey, value)
+		}
 		paramset := converter.ConvertCombinedParameterToParamset(valueKey, s)
 		return r.PutParamset(address, hmconst.ParamsetAttrValues, paramset, force)
 	}
@@ -661,8 +689,17 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 		}
 
 		if paramType == hmconst.ParamsetTypeAction {
+			hook := r.onSetValue
 			r.mu.Unlock()
 			r.fireEvent(r.interfaceID, address, valueKey, true)
+			// Invoke the user-supplied OnSetValue hook after the
+			// echo event so the hook can script additional side-DP
+			// callbacks for ACTION writes (e.g. AUTO_MODE →
+			// CONTROL_MODE on RF thermostats). The hook is allowed
+			// to call FireEvent / SetValue back into the rpc.
+			if hook != nil {
+				hook(address, valueKey, value)
+			}
 			return nil
 		}
 
@@ -694,10 +731,20 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 			toFire = append(toFire, firedEvent{key: k, value: v})
 		}
 	}
+	hook := r.onSetValue
 	r.mu.Unlock()
 
 	for _, ev := range toFire {
 		r.fireEvent(r.interfaceID, address, ev.key, ev.value)
+	}
+	// Hook fires once per outer PutParamset call, after the
+	// auto-computed deviceresponses but BEFORE the caller sees the
+	// return — this lets a hook stage its side-DPs and have them
+	// land in the same logical batch from the caller's perspective.
+	if hook != nil {
+		for valueKey, value := range paramset {
+			hook(address, valueKey, value)
+		}
 	}
 	return nil
 }
@@ -975,7 +1022,7 @@ func (r *RPCFunctions) GetLinks(channelAddress string, _ int) []any {
 	}
 	return out
 }
-func (r *RPCFunctions) GetInstallMode() int            { return 0 }
+func (r *RPCFunctions) GetInstallMode() int { return 0 }
 func (r *RPCFunctions) SetInstallMode(_ bool, _ int, _ int, _ string) bool {
 	return true
 }
