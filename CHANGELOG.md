@@ -9,6 +9,50 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-05-21
+
+### Added
+
+- **`OnSetValue` hook** (`pkg/godevccu.Config.OnSetValue`, forwarded
+  through `internal/virtualccu` to `internal/ccu`): a callback invoked
+  synchronously after every successful `SetValue` / `PutParamset`
+  paramset write. The hook receives the channel address, the value
+  key and the written value, and runs on the writer's goroutine —
+  long-running work must be dispatched separately. Combined-parameter
+  writes (e.g. `COMBINED_PARAMETER`, `LEVEL_COMBINED`) surface their
+  raw wire-shape *before* expansion so callers observe what
+  gohomematic actually emitted; the per-parameter callbacks for the
+  decomposed paramset still fire afterwards. Re-entering through
+  `FireEvent` / `SetValue` from inside the hook is allowed, which
+  lets tests script CCU-side echo events for ACTION DPs (such as the
+  `AUTO_MODE` → `CONTROL_MODE` pair on RF thermostats).
+- **Nested-array XML-RPC encoding** (`internal/xmlrpc/convert.go`):
+  `FromAny` now recognises `[][]any` and emits properly nested
+  `<array>` elements instead of falling back to a `fmt.Sprintf`
+  string. This fixes the wire shape of responses like
+  `getServiceMessages`, which return a list of `[address, key,
+  value]` triples.
+
+### Changed
+
+- **ReGa `get_serial.fn` handler** (`internal/rega/engine.go`): the
+  pattern matcher now recognises `get_serial` references with or
+  without the `.fn` suffix (`\bget_serial(\.fn)?\b`), matching
+  aiohomematic / gohomematic script variants that strip the
+  extension. The handler also returns the serial wrapped in a
+  `{"serial": …}` object rather than the bare string, matching the
+  shape pydevccu emits.
+
+### Tests
+
+- Extensive new unit and integration coverage across `internal/ccu`,
+  `internal/converter`, `internal/devicelogic`,
+  `internal/deviceresponses`, `internal/hmconst`, `internal/jsonrpc`,
+  `internal/rega`, `internal/session`, `internal/state`,
+  `internal/virtualccu`, `internal/xmlrpc` and `pkg/godevccu`,
+  exercising RPC/server, paramset conversion, persistence and
+  callback paths.
+
 ## [0.1.1] — 2026-05-03
 
 ### Added
@@ -95,6 +139,7 @@ Initial release. A standalone Go port of
   and `3.87.1.20250130` in CCU/OpenCCU mode — identical to upstream
   pydevccu so clients that branch on the prefix keep working.
 
-[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/SukramJ/godevccu/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/SukramJ/godevccu/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/SukramJ/godevccu/releases/tag/v0.1.0
