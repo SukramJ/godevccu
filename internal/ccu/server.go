@@ -180,6 +180,10 @@ func (s *Server) registerMethods() {
 		return xmlrpc.FromAny(any(rpc.GetServiceMessages())), nil
 	})
 
+	mux.Handle("listBidcosInterfaces", func(_ context.Context, _ []xmlrpc.Value) (xmlrpc.Value, error) {
+		return xmlrpc.FromAny(any(toAnySlice(rpc.ListBidcosInterfaces()))), nil
+	})
+
 	mux.Handle("getAllSystemVariables", func(_ context.Context, _ []xmlrpc.Value) (xmlrpc.Value, error) {
 		return xmlrpc.FromAny(any(rpc.GetAllSystemVariables())), nil
 	})
