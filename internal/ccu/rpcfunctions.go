@@ -404,6 +404,53 @@ func (r *RPCFunctions) RemoveDevices(ctx context.Context, devices []string) {
 	}
 }
 
+// ReplaceDevice pushes a replaceDevice system event to every registered
+// callback receiver, telling them the device at oldAddress has been swapped
+// for newAddress. The real CCU emits this during a teach-in replacement; the
+// wire shape is (interfaceID, oldDeviceAddress, newDeviceAddress).
+func (r *RPCFunctions) ReplaceDevice(ctx context.Context, oldAddress, newAddress string) {
+	r.mu.Lock()
+	remotes := make(map[string]*xmlrpc.Client, len(r.remotes))
+	for k, v := range r.remotes {
+		remotes[k] = v
+	}
+	r.mu.Unlock()
+
+	for ifID, client := range remotes {
+		params := []xmlrpc.Value{
+			xmlrpc.StringValue(ifID),
+			xmlrpc.StringValue(oldAddress),
+			xmlrpc.StringValue(newAddress),
+		}
+		if _, err := client.Call(ctx, "replaceDevice", params); err != nil {
+			r.logger.Debug("ccu: replaceDevice push failed", "interface", ifID, "err", err)
+		}
+	}
+}
+
+// ReaddedDevice pushes a readdedDevice system event to every registered
+// callback receiver. The real CCU emits this when devices re-pair via install
+// mode; addresses are the entries the client should drop and re-fetch as part
+// of the re-add. The wire shape is (interfaceID, addresses[]).
+func (r *RPCFunctions) ReaddedDevice(ctx context.Context, addresses []string) {
+	r.mu.Lock()
+	remotes := make(map[string]*xmlrpc.Client, len(r.remotes))
+	for k, v := range r.remotes {
+		remotes[k] = v
+	}
+	r.mu.Unlock()
+
+	for ifID, client := range remotes {
+		params := []xmlrpc.Value{
+			xmlrpc.StringValue(ifID),
+			xmlrpc.FromAny(any(addresses)),
+		}
+		if _, err := client.Call(ctx, "readdedDevice", params); err != nil {
+			r.logger.Debug("ccu: readdedDevice push failed", "interface", ifID, "err", err)
+		}
+	}
+}
+
 // deviceMatchesType reproduces _device_matches_type from pydevccu: a
 // channel matches when its PARENT_TYPE equals the type, otherwise the
 // device's TYPE itself is consulted.
@@ -455,6 +502,14 @@ func (r *RPCFunctions) GetVersion() string { return r.version }
 // example service message.
 func (r *RPCFunctions) GetServiceMessages() [][]any {
 	return [][]any{{"VCU0000001:1", hmconst.AttrError, 7}}
+}
+
+// ListBidcosInterfaces returns the BidCoS interface inventory. The simulator
+// models no physical radio gateways, so it returns an empty list — enough for
+// callers that probe the method during interface detection without asserting
+// on concrete gateway entries.
+func (r *RPCFunctions) ListBidcosInterfaces() []map[string]any {
+	return []map[string]any{}
 }
 
 // GetAllSystemVariables returns the same hard-coded test data as the

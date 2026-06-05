@@ -9,6 +9,24 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-06-05
+
+### Added
+
+- **`listBidcosInterfaces` XML-RPC method** (`internal/ccu`): returns
+  an empty interface inventory. The simulator models no physical
+  BidCoS radio gateways, but exposing the method lets clients probe it
+  during interface detection without provoking a `methodNotFound`
+  fault.
+- **`replaceDevice` / `readdedDevice` callback push helpers**
+  (`RPCFunctions.ReplaceDevice`, `RPCFunctions.ReaddedDevice`): push
+  the corresponding system events to every registered callback
+  receiver, mirroring the real CCU's wire shape — `replaceDevice`
+  carries `(interfaceID, oldDeviceAddress, newDeviceAddress)`,
+  `readdedDevice` carries `(interfaceID, addresses[])`. These let
+  consumers exercise device-replacement and re-pair callback paths
+  end to end.
+
 ## [0.1.2] — 2026-05-21
 
 ### Added
