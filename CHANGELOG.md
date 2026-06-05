@@ -157,7 +157,8 @@ Initial release. A standalone Go port of
   and `3.87.1.20250130` in CCU/OpenCCU mode — identical to upstream
   pydevccu so clients that branch on the prefix keep working.
 
-[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/SukramJ/godevccu/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/SukramJ/godevccu/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/SukramJ/godevccu/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/SukramJ/godevccu/releases/tag/v0.1.0
