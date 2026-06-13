@@ -328,9 +328,19 @@ func (m *Manager) AddRoom(name, description string, channelIDs []string, id int)
 		id = m.nextRoomID
 		m.nextRoomID++
 	}
-	r := &Room{ID: id, Name: name, Description: description, ChannelIDs: append([]string(nil), channelIDs...)}
+	r := &Room{ID: id, Name: name, Description: description, ChannelIDs: cloneChannelIDs(channelIDs)}
 	m.rooms[id] = r
 	return r
+}
+
+// cloneChannelIDs returns a non-nil copy of ids. Rooms and functions without
+// any assigned channels must serialize as an empty array ("[]") rather than
+// null: the reference XML-RPC/JSON-RPC stack iterates channelIds directly and
+// a null value would crash room/function enumeration on the client side.
+func cloneChannelIDs(ids []string) []string {
+	out := make([]string, len(ids))
+	copy(out, ids)
+	return out
 }
 
 // Rooms returns all rooms.
@@ -340,7 +350,7 @@ func (m *Manager) Rooms() []*Room {
 	out := make([]*Room, 0, len(m.rooms))
 	for _, r := range m.rooms {
 		c := *r
-		c.ChannelIDs = append([]string(nil), r.ChannelIDs...)
+		c.ChannelIDs = cloneChannelIDs(r.ChannelIDs)
 		out = append(out, &c)
 	}
 	return out
@@ -355,7 +365,7 @@ func (m *Manager) Room(id int) (*Room, bool) {
 		return nil, false
 	}
 	c := *r
-	c.ChannelIDs = append([]string(nil), r.ChannelIDs...)
+	c.ChannelIDs = cloneChannelIDs(r.ChannelIDs)
 	return &c, true
 }
 
@@ -401,7 +411,7 @@ func (m *Manager) AddFunction(name, description string, channelIDs []string, id 
 		id = m.nextFunctionID
 		m.nextFunctionID++
 	}
-	f := &Function{ID: id, Name: name, Description: description, ChannelIDs: append([]string(nil), channelIDs...)}
+	f := &Function{ID: id, Name: name, Description: description, ChannelIDs: cloneChannelIDs(channelIDs)}
 	m.functions[id] = f
 	return f
 }
@@ -413,7 +423,7 @@ func (m *Manager) Functions() []*Function {
 	out := make([]*Function, 0, len(m.functions))
 	for _, f := range m.functions {
 		c := *f
-		c.ChannelIDs = append([]string(nil), f.ChannelIDs...)
+		c.ChannelIDs = cloneChannelIDs(f.ChannelIDs)
 		out = append(out, &c)
 	}
 	return out
@@ -428,7 +438,7 @@ func (m *Manager) Function(id int) (*Function, bool) {
 		return nil, false
 	}
 	c := *f
-	c.ChannelIDs = append([]string(nil), f.ChannelIDs...)
+	c.ChannelIDs = cloneChannelIDs(f.ChannelIDs)
 	return &c, true
 }
 

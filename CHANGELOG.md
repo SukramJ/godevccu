@@ -9,6 +9,22 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.1.4] — 2026-06-13
+
+### Fixed
+
+- **Rooms and functions serialize `channelIds` as an empty array (`[]`)
+  instead of `null`** (`internal/state`). Rooms/functions without any
+  assigned channels previously emitted `null` over both JSON-RPC
+  (`Room.getAll`, `Subsection.getAll`) and the ReGa engine, because the
+  accessor copies used `append([]string(nil), ...)`, which yields `nil`
+  for an empty input. The real CCU contract returns `[]`; clients that
+  iterate `channelIds` directly crashed during room/function
+  enumeration. A new `cloneChannelIDs` helper guarantees a non-nil copy
+  at every room/function accessor and creation site. Surfaced by a
+  three-way godevccu parity e2e harness in the reference Home Assistant
+  integration.
+
 ## [0.1.3] — 2026-06-05
 
 ### Added
@@ -157,7 +173,8 @@ Initial release. A standalone Go port of
   and `3.87.1.20250130` in CCU/OpenCCU mode — identical to upstream
   pydevccu so clients that branch on the prefix keep working.
 
-[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/SukramJ/godevccu/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/SukramJ/godevccu/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/SukramJ/godevccu/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/SukramJ/godevccu/compare/v0.1.0...v0.1.1
