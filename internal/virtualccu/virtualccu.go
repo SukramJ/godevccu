@@ -59,6 +59,11 @@ type Config struct {
 	EnableLogic   bool
 	LogicConfig   devicelogic.Config
 	Logger        *slog.Logger
+	// StartNotReady boots the CCU in its "still warming up" state: the
+	// JSON-RPC web API answers 503 and /ise/checkrega.cgi reports "not ready"
+	// until [VirtualCCU.SetReady](true) is called. Models an add-on co-started
+	// with a (re)booting CCU. Defaults to false (immediately ready).
+	StartNotReady bool
 	// OnSetValue is forwarded to [ccu.Options.OnSetValue]. The hook
 	// is invoked synchronously after every successful PutParamset
 	// write. Tests use it to model CCU-side echo events for ACTION
@@ -250,6 +255,7 @@ func (v *VirtualCCU) Start() error {
 			Handlers: handlers,
 			Logger:   v.logger,
 		})
+		v.jsonrpc.SetReady(!v.cfg.StartNotReady)
 		if err := v.jsonrpc.Start(); err != nil {
 			_ = v.xmlrpc.Stop()
 			return fmt.Errorf("virtualccu: json-rpc start: %w", err)
@@ -260,6 +266,29 @@ func (v *VirtualCCU) Start() error {
 	}
 	v.running = true
 	return nil
+}
+
+// SetReady toggles the simulated CCU boot state. Pass false to make the
+// JSON-RPC web API answer 503 and /ise/checkrega.cgi report "not ready"
+// (modelling a CCU still warming up); pass true once it has "finished
+// booting". A no-op in Homegear mode (no JSON-RPC surface). Safe for
+// concurrent use; may be called while the CCU is running.
+func (v *VirtualCCU) SetReady(ready bool) {
+	v.mu.Lock()
+	srv := v.jsonrpc
+	v.mu.Unlock()
+	if srv != nil {
+		srv.SetReady(ready)
+	}
+}
+
+// Ready reports the current simulated boot state. Returns true in Homegear
+// mode (no JSON-RPC readiness gate) and before Start.
+func (v *VirtualCCU) Ready() bool {
+	v.mu.Lock()
+	srv := v.jsonrpc
+	v.mu.Unlock()
+	return srv == nil || srv.Ready()
 }
 
 // Stop shuts both servers down.

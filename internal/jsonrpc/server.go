@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/SukramJ/godevccu/internal/session"
@@ -62,6 +63,15 @@ type Server struct {
 	mu      sync.Mutex
 	running bool
 	methods map[string]HandlerFunc
+
+	// ready models the CCU boot state. A real CCU answers its web API
+	// (Device.listAllDetail and friends) with http 503 for the first ~minute
+	// after power-on while ReGaHss warms up, and /ise/checkrega.cgi returns a
+	// body other than "OK" until then. While ready is false the JSON-RPC
+	// surface returns 503 and checkrega reports "not ready"; flip it with
+	// [Server.SetReady]. Defaults to true so existing fixtures see an
+	// immediately-serving CCU.
+	ready atomic.Bool
 }
 
 // Config configures [NewServer].
@@ -77,7 +87,7 @@ func NewServer(cfg Config) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{
+	s := &Server{
 		logger:   logger,
 		addr:     cfg.Address,
 		handlers: cfg.Handlers,
@@ -85,7 +95,18 @@ func NewServer(cfg Config) *Server {
 		state:    cfg.Handlers.State,
 		methods:  cfg.Handlers.Methods(),
 	}
+	s.ready.Store(true)
+	return s
 }
+
+// SetReady toggles the simulated CCU boot state. Pass false to model a CCU
+// that is still warming up (JSON-RPC answers 503, /ise/checkrega.cgi reports
+// "not ready"); pass true once it has "finished booting". Safe for concurrent
+// use.
+func (s *Server) SetReady(ready bool) { s.ready.Store(ready) }
+
+// Ready reports the current simulated boot state.
+func (s *Server) Ready() bool { return s.ready.Load() }
 
 // LocalAddr returns the bound address (only valid after Start).
 func (s *Server) LocalAddr() net.Addr {
@@ -107,6 +128,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("/config/cp_security.cgi", s.handleBackupDownload)
 	mux.HandleFunc("/config/cp_maintenance.cgi", s.handleMaintenance)
 	mux.HandleFunc("/VERSION", s.handleVersion)
+	mux.HandleFunc("/ise/checkrega.cgi", s.handleCheckRega)
 
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
@@ -149,7 +171,28 @@ func (s *Server) Stop() error {
 // JSON-RPC
 // ─────────────────────────────────────────────────────────────────
 
+// handleCheckRega serves the CCU's readiness probe. The OCCU WebUI boot page
+// polls this in a loop and only proceeds once the body is the literal "OK";
+// while the simulated CCU is still booting it returns a non-OK body so a
+// readiness-gated client keeps waiting. Always HTTP 200 (lighttpd is up), the
+// body carries the signal — matching the real /ise/checkrega.cgi contract.
+func (s *Server) handleCheckRega(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if s.ready.Load() {
+		_, _ = io.WriteString(w, "OK")
+		return
+	}
+	_, _ = io.WriteString(w, "ReGaHss not ready")
+}
+
 func (s *Server) handleJSONRPC(w http.ResponseWriter, r *http.Request) {
+	// Model the boot window: a CCU whose ReGaHss has not finished starting
+	// answers the web API with http 503 ("internal backend exception"). A
+	// readiness-gated client must not call this until checkrega reports OK.
+	if !s.ready.Load() {
+		http.Error(w, "service not available", http.StatusServiceUnavailable)
+		return
+	}
 	switch r.Method {
 	case http.MethodPost:
 		s.handleJSONRPCPost(w, r)
