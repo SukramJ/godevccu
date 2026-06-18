@@ -9,6 +9,23 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.1.5] — 2026-06-18
+
+### Added
+
+- **Simulated CCU boot window (readiness gate)** (`internal/virtualccu`,
+  `internal/jsonrpc`). A new `Config.StartNotReady` boots the virtual CCU in
+  its "still warming up" state, and `VirtualCCU.SetReady(bool)` / `Ready()`
+  flip it at runtime. While not ready the JSON-RPC web API
+  (`/api/homematic.cgi`, e.g. `Device.listAllDetail`) answers http 503
+  ("internal backend exception") and the new `/ise/checkrega.cgi` probe
+  returns a body other than the literal `OK`; once ready, checkrega returns
+  `OK` and the API serves normally. This models an add-on co-started with a
+  (re)booting CCU — XML-RPC `listDevices` (devices) can succeed while
+  JSON-RPC (names) still 503s — so a readiness-gated client can be exercised
+  end-to-end against the boot race. Defaults are unchanged: every existing
+  fixture boots immediately ready.
+
 ## [0.1.4] — 2026-06-13
 
 ### Fixed
