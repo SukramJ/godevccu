@@ -1,0 +1,33 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    reviewers:
+      - SukramJ
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: chore
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    reviewers:
+      - SukramJ
+    labels:
+      - dependencies
+      - go
+    commit-message:
+      prefix: chore
+    groups:
+      gomod:
+        patterns:
+          - "*"
