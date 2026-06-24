@@ -1,0 +1,19 @@
+godevccu
+Copyright (c) 2026 SukramJ
+
+This product is a Go port of pydevccu
+(https://github.com/sukramj/pydevccu), licensed under the MIT License:
+
+    Copyright (c) Daniel Perna <danielperna84@gmail.com>
+    Copyright (c) SukramJ <sukramj@icloud.com>
+
+Portions of this software — in particular the design, behaviour and the
+embedded device and paramset descriptions under
+internal/embed/data/{device_descriptions,paramset_descriptions}/ — are
+derived from pydevccu and are used under the terms of the MIT License.
+
+The embedded device and paramset descriptions were initially extracted
+from HomeMatic firmware XML. The eQ-3 license terms (non-commercial) apply
+to that data.
+
+See the LICENSE file for the full MIT License text.
