@@ -145,6 +145,9 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           body_path: release-notes.md
-          files: dist/*
+          files: |
+            dist/*
+            LICENSE
+            NOTICE
           draft: false
           prerelease: ${{ needs.meta.outputs.prerelease }}

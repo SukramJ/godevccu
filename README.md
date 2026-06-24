@@ -121,6 +121,6 @@ The CI workflow (`.github/workflows/ci.yml`) runs lint, vet, test and build on L
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](LICENSE). See [`NOTICE`](NOTICE) for attribution.
 
-The embedded device and paramset descriptions originate from [pydevccu](https://github.com/sukramj/pydevccu) and were initially extracted from HomeMatic firmware XML. The eQ-3 license terms (non-commercial) apply to that data.
+`godevccu` is a port of [pydevccu](https://github.com/sukramj/pydevccu) by Daniel Perna and SukramJ. The embedded device and paramset descriptions originate from pydevccu and were initially extracted from HomeMatic firmware XML. The eQ-3 license terms (non-commercial) apply to that data.
