@@ -119,6 +119,10 @@ go test ./internal/virtualccu/...      # end-to-end tests
 
 The CI workflow (`.github/workflows/ci.yml`) runs lint, vet, test and build on Linux, macOS and Windows.
 
+## Development
+
+Parts of `godevccu` are developed with agentic AI assistance, primarily [Claude Code](https://www.anthropic.com/claude-code). Submitted issues are also triaged and analysed with agentic help. Every change is still reviewed by a human maintainer and has to pass the project's tests before it lands — the AI accelerates the work, it does not replace the review gate.
+
 ## License
 
 MIT — see [`LICENSE`](LICENSE). See [`NOTICE`](NOTICE) for attribution.
