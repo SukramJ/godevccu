@@ -33,9 +33,14 @@ func loadAllDevices(restrict []string) ([]loadedDeviceSet, error) {
 	dd := emb.DeviceDescriptions()
 	pd := emb.ParamsetDescriptions()
 
+	// Device-type spelling is inconsistent across the embedded fixture
+	// set (e.g. "HMIP-PS.json" vs "HmIP-PSMCO.json"), and callers pass
+	// the marketing spelling ("HmIP-PS"). Normalize both sides to a
+	// canonical case before comparing so the restrict list is
+	// effectively case-insensitive.
 	allowed := map[string]struct{}{}
 	for _, name := range restrict {
-		allowed[name] = struct{}{}
+		allowed[strings.ToUpper(name)] = struct{}{}
 	}
 
 	out := make([]loadedDeviceSet, 0)
@@ -52,7 +57,7 @@ func loadAllDevices(restrict []string) ([]loadedDeviceSet, error) {
 		devName := strings.ReplaceAll(base, "_", " ")
 
 		if len(allowed) > 0 {
-			if _, ok := allowed[devName]; !ok {
+			if _, ok := allowed[strings.ToUpper(devName)]; !ok {
 				return nil
 			}
 		}

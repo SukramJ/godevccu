@@ -174,6 +174,47 @@ func TestFireEvent(t *testing.T) {
 	}
 }
 
+// TestSimulateDeviceEvent locks in the RECEIVE-direction primitive: a
+// value change fires to every registered callback even though the
+// parameter is read-only telemetry (SMOKE_DETECTOR_ALARM_STATUS is
+// ops=RE, no write bit) and a plain SetValue without force would
+// reject it.
+func TestSimulateDeviceEvent(t *testing.T) {
+	rpc := newRPC(t)
+
+	// Sanity check the write-gate actually rejects a non-forced write
+	// to this read-only telemetry parameter, so the test below proves
+	// SimulateDeviceEvent genuinely bypasses it rather than the
+	// parameter having been writable all along.
+	if err := rpc.SetValue("VCU2822385:1", "SMOKE_DETECTOR_ALARM_STATUS", 1, false); err == nil {
+		t.Fatal("expected SetValue without force to reject a read-only telemetry write")
+	}
+
+	var (
+		gotAddr  string
+		gotKey   string
+		gotValue any
+	)
+	rpc.RegisterParamsetCallback(func(_, address, valueKey string, value any) {
+		gotAddr, gotKey, gotValue = address, valueKey, value
+	})
+
+	if err := rpc.SimulateDeviceEvent("VCU2822385:1", "SMOKE_DETECTOR_ALARM_STATUS", 1); err != nil {
+		t.Fatalf("SimulateDeviceEvent: %v", err)
+	}
+	if gotAddr != "VCU2822385:1" || gotKey != "SMOKE_DETECTOR_ALARM_STATUS" || gotValue != 1 {
+		t.Fatalf("callback got (%q, %q, %v), want (VCU2822385:1, SMOKE_DETECTOR_ALARM_STATUS, 1)", gotAddr, gotKey, gotValue)
+	}
+
+	v, err := rpc.GetValue("VCU2822385:1", "SMOKE_DETECTOR_ALARM_STATUS")
+	if err != nil {
+		t.Fatalf("GetValue: %v", err)
+	}
+	if v != 1 {
+		t.Fatalf("GetValue after SimulateDeviceEvent = %v, want 1", v)
+	}
+}
+
 func TestAddDevices(t *testing.T) {
 	rpc, err := ccu.NewRPCFunctions(ccu.Options{Devices: []string{"HmIP-SWSD"}})
 	if err != nil {

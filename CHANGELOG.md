@@ -9,6 +9,37 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.1.7] — 2026-07-09
+
+### Added
+
+- **`VirtualCCU.SimulateDeviceEvent(address, valueKey, value)`** — emulate the
+  CCU RF/HmIP layer delivering an unsolicited device-originated value change to
+  subscribers. A thin `PutParamset(..., force=true)` wrapper that runs the
+  device's `ComputeEvents` follow-ups and fires them to registered callbacks, so
+  a consumer's test can drive the receive direction (CCU → controller) for a
+  read-only (`ops=RE`) telemetry parameter without tripping the operator-write
+  permission gate.
+
+### Fixed
+
+- **Case-insensitive fleet loading.** The device loader dropped fixtures whose
+  restrict-list spelling differed in case from the embedded filename (e.g.
+  `HmIP-PS` vs `HMIP-PS.json`), silently returning fewer devices than requested;
+  both sides are now upper-cased before matching (`internal/ccu/loader.go`).
+- **Case-insensitive device-response mapping.** `deviceresponses.Mapping` /
+  `startsWith` now compare case-insensitively, so `stateWithWorking` /
+  `windowState` follow-up events apply to the all-caps `HMIP-*` device types.
+
+### Changed
+
+- Explicit `ComputeEvents` telemetry entries for the read-only params a consumer
+  send/receive matrix exercises (BWTH temperature/humidity, BSM
+  power/energy/voltage/current/frequency, smoke-alarm status, motion/illuminance,
+  contact state, CO₂ concentration, low-battery), so receive coverage no longer
+  relies only on the generic echo fallback. `blindLevel` now synthesizes
+  `ACTIVITY_STATE` alongside `LEVEL`, symmetric with `levelWithActivity`.
+
 ## [0.1.6] — 2026-06-23
 
 ### Changed

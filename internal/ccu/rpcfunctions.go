@@ -693,6 +693,17 @@ func (r *RPCFunctions) SetValue(address, valueKey string, value any, force bool)
 	return r.PutParamset(address, hmconst.ParamsetAttrValues, map[string]any{valueKey: value}, force)
 }
 
+// SimulateDeviceEvent emulates the CCU RF/HmIP layer delivering an
+// unsolicited device-originated value change to subscribers; bypasses
+// the operator-write permission gate on purpose (read-only telemetry
+// params like ACTUAL_TEMPERATURE are ops=RE and would otherwise reject
+// the write). Use this to drive RECEIVE-direction test scenarios where
+// a "device" reports a new sensor reading rather than an operator
+// writing a controllable parameter.
+func (r *RPCFunctions) SimulateDeviceEvent(address, valueKey string, value any) error {
+	return r.PutParamset(address, hmconst.ParamsetAttrValues, map[string]any{valueKey: value}, true)
+}
+
 // PutParamset writes one or more values into the paramset and fires the
 // computed follow-up events.
 //
@@ -744,6 +755,13 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 		}
 
 		if paramType == hmconst.ParamsetTypeAction {
+			// ACTION parameters are stateless triggers on the wire: the
+			// CCU always fires the boolean `true` echo regardless of the
+			// caller-supplied value, and the write is never persisted
+			// into the paramset (mirrors pydevccu's fire-only ACTION
+			// semantics). A caller must not read the value back via
+			// GetValue/GetParamset — assert the write by capturing the
+			// fired callback event instead.
 			hook := r.onSetValue
 			r.mu.Unlock()
 			r.fireEvent(r.interfaceID, address, valueKey, true)

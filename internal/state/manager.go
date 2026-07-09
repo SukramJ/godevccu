@@ -659,13 +659,25 @@ func (m *Manager) TriggerUpdate() bool {
 // ─────────────────────────────────────────────────────────────────
 
 // SetDeviceValue stores a value indexed by "ADDRESS:VALUE_KEY".
+//
+// This is a disjoint pure cache, unrelated to the RPC-facing paramset
+// store in ccu.RPCFunctions: it does not validate against a paramset
+// description, does not fire events to registered callbacks, and is
+// never consulted by ccu.RPCFunctions.SetValue / PutParamset / GetValue.
+// It exists for ReGa scripts and other state-package consumers that
+// need a scratch value cache outside the RPC write path. To simulate a
+// device-originated value change that subscribers observe, use
+// ccu.RPCFunctions.SimulateDeviceEvent (or SetValue/PutParamset with
+// force) instead.
 func (m *Manager) SetDeviceValue(address, valueKey string, value any) {
 	m.mu.Lock()
 	m.deviceValues[address+":"+valueKey] = value
 	m.mu.Unlock()
 }
 
-// DeviceValue returns the cached value (nil, false) when absent.
+// DeviceValue returns the cached value (nil, false) when absent. See
+// [Manager.SetDeviceValue] for why this cache is disjoint from the
+// RPC-facing paramset store and never fires events.
 func (m *Manager) DeviceValue(address, valueKey string) (any, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

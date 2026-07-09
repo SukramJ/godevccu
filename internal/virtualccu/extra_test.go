@@ -62,6 +62,43 @@ func TestRPC(t *testing.T) {
 	}
 }
 
+// TestSimulateDeviceEvent proves the VirtualCCU-level convenience
+// wrapper reaches RPCFunctions.SimulateDeviceEvent and the resulting
+// event is observable through the same callback path a chip-tool
+// RECEIVE test would subscribe on.
+func TestSimulateDeviceEvent(t *testing.T) {
+	v := startEphemeral(t)
+
+	var (
+		gotKey   string
+		gotValue any
+	)
+	v.RPC().RegisterParamsetCallback(func(_, _, valueKey string, value any) {
+		gotKey, gotValue = valueKey, value
+	})
+
+	if err := v.SimulateDeviceEvent("VCU2822385:1", "SMOKE_DETECTOR_ALARM_STATUS", 1); err != nil {
+		t.Fatalf("SimulateDeviceEvent: %v", err)
+	}
+	if gotKey != "SMOKE_DETECTOR_ALARM_STATUS" || gotValue != 1 {
+		t.Fatalf("callback got (%q, %v), want (SMOKE_DETECTOR_ALARM_STATUS, 1)", gotKey, gotValue)
+	}
+}
+
+// TestSimulateDeviceEventBeforeStart guards the not-running error path.
+func TestSimulateDeviceEventBeforeStart(t *testing.T) {
+	v, err := virtualccu.New(virtualccu.Config{
+		Mode: hmconst.BackendModeOpenCCU,
+		Host: "127.0.0.1",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := v.SimulateDeviceEvent("VCU2822385:1", "SMOKE_DETECTOR_ALARM_STATUS", 1); err == nil {
+		t.Fatal("expected error before Start")
+	}
+}
+
 func TestMode(t *testing.T) {
 	v, err := virtualccu.New(virtualccu.Config{
 		Mode: hmconst.BackendModeCCU,

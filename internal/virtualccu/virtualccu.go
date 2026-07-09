@@ -166,6 +166,18 @@ func (v *VirtualCCU) RPC() *ccu.RPCFunctions {
 	return v.xmlrpc.RPC()
 }
 
+// SimulateDeviceEvent emulates an unsolicited device-originated value
+// change (e.g. a sensor reporting a new reading) and delivers it to
+// every registered subscriber, exactly as
+// [ccu.RPCFunctions.SimulateDeviceEvent] does. Only valid after Start.
+func (v *VirtualCCU) SimulateDeviceEvent(address, valueKey string, value any) error {
+	rpc := v.RPC()
+	if rpc == nil {
+		return errors.New("virtualccu: not running")
+	}
+	return rpc.SimulateDeviceEvent(address, valueKey, value)
+}
+
 // XMLRPCAddr returns the local XML-RPC address (only after Start).
 func (v *VirtualCCU) XMLRPCAddr() net.Addr {
 	v.mu.Lock()

@@ -6,7 +6,10 @@
 // emitting one or more follow-up events.
 package deviceresponses
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // Transformer turns a trigger value plus the current paramset into the
 // follow-up events that the device emits. Returning nil is equivalent
@@ -37,7 +40,7 @@ var deviceResponseMappings = map[string]map[string]ParameterResponse{
 	// Switches
 	"HmIP-PS":   stateWithWorking,
 	"HmIP-PSM":  stateWithWorking,
-	"HmIP-BSM":  stateWithWorking,
+	"HmIP-BSM":  bsmResponses,
 	"HmIP-FSM":  stateWithWorking,
 	"HmIP-PCBS": stateWithWorking,
 	"HM-LC-Sw":  stateWithWorking,
@@ -59,16 +62,22 @@ var deviceResponseMappings = map[string]map[string]ParameterResponse{
 	"HmIP-eTRV":    thermostatSetpointWithControlMode,
 	"HmIP-HEATING": thermostatSetpointOnly,
 	"HmIP-WTH":     thermostatSetpointOnly,
-	"HmIP-BWTH":    thermostatSetpointOnly,
+	"HmIP-BWTH":    bwthResponses,
 	"HmIP-STH":     thermostatSetpointOnly,
 	"HM-CC-RT-DN":  rtdnSetpointAndMode,
 
 	// Sensors with test commands
 	"HmIP-SWSD": smokeDetectorTest,
 
+	// Motion / illumination sensors
+	"HmIP-SMI": motionSensor,
+
 	// Window/door contacts
 	"HmIP-SWDO": windowState,
 	"HmIP-SRH":  windowState,
+
+	// Climate sensors (CO2 / VOC concentration)
+	"HmIP-SCTH230": concentrationSensor,
 
 	// Lock actuators
 	"HmIP-DLD": lockTargetLevel,
@@ -83,6 +92,25 @@ var stateWithWorking = map[string]ParameterResponse{
 			return map[string]any{"STATE": v, "WORKING": false}
 		},
 	},
+}
+
+// bsmResponses is HmIP-BSM's own table rather than a reuse of
+// stateWithWorking: the energy-metering channel (ENERGIE_METER_TRANSMITTER)
+// reports POWER/ENERGY_COUNTER/VOLTAGE/CURRENT/FREQUENCY as read-only
+// telemetry (ops=RE) that a real device originates on its own. These
+// are single-key echo entries — the simulator has no synthetic energy
+// model, it just relays whatever value a test injects (typically via
+// ccu.RPCFunctions.SimulateDeviceEvent). Kept as its own map, instead of
+// adding these keys to the shared stateWithWorking table, so plain
+// switches without an energy-metering channel don't gain phantom
+// parameters.
+var bsmResponses = map[string]ParameterResponse{
+	"STATE":          stateWithWorking["STATE"],
+	"POWER":          {TriggerParam: "POWER", EchoTrigger: true},
+	"ENERGY_COUNTER": {TriggerParam: "ENERGY_COUNTER", EchoTrigger: true},
+	"VOLTAGE":        {TriggerParam: "VOLTAGE", EchoTrigger: true},
+	"CURRENT":        {TriggerParam: "CURRENT", EchoTrigger: true},
+	"FREQUENCY":      {TriggerParam: "FREQUENCY", EchoTrigger: true},
 }
 
 var levelToLevelReal = map[string]ParameterResponse{
@@ -111,7 +139,19 @@ var blindLevel = map[string]ParameterResponse{
 	"LEVEL": {
 		TriggerParam: "LEVEL",
 		ValueTransformer: func(v any, current map[string]any) map[string]any {
-			out := map[string]any{"LEVEL": v}
+			// Same shape as levelWithActivity: HmIP-BROLL/HmIP-BBL/
+			// HmIP-FBL report ACTIVITY_STATE alongside LEVEL too, so a
+			// LEVEL write must synthesize it here as well. The ENUM
+			// index differs from the dimmer mapping (1 = moving, not
+			// levelWithActivity's 2) — a blind's ACTIVITY_STATE only
+			// distinguishes moving vs. idle from a LEVEL write, it
+			// does not know the direction (UP=1/DOWN=2 in the wire
+			// enum) without a target LEVEL to compare against.
+			activity := 1
+			if isZero(v) {
+				activity = 0
+			}
+			out := map[string]any{"LEVEL": v, "ACTIVITY_STATE": activity}
 			if l2, ok := current["LEVEL_2"]; ok {
 				out["LEVEL_2"] = l2
 			}
@@ -147,6 +187,19 @@ var thermostatSetpointOnly = map[string]ParameterResponse{
 	},
 }
 
+// bwthResponses is HmIP-BWTH's own table rather than a reuse of
+// thermostatSetpointOnly: the wall-mount thermostat channel also
+// reports ACTUAL_TEMPERATURE and HUMIDITY as read-only telemetry
+// (ops=RE) that a real device originates on its own. Single-key echo
+// entries document that these are simulator-settable via
+// ccu.RPCFunctions.SimulateDeviceEvent rather than relying on the
+// untested default echo fallback.
+var bwthResponses = map[string]ParameterResponse{
+	"SET_POINT_TEMPERATURE": thermostatSetpointOnly["SET_POINT_TEMPERATURE"],
+	"ACTUAL_TEMPERATURE":    {TriggerParam: "ACTUAL_TEMPERATURE", EchoTrigger: true},
+	"HUMIDITY":              {TriggerParam: "HUMIDITY", EchoTrigger: true},
+}
+
 var thermostatSetpointWithControlMode = map[string]ParameterResponse{
 	"SET_POINT_TEMPERATURE": {
 		TriggerParam: "SET_POINT_TEMPERATURE",
@@ -176,6 +229,33 @@ var smokeDetectorTest = map[string]ParameterResponse{
 			}
 		},
 	},
+	// SMOKE_DETECTOR_ALARM_STATUS is also read-only telemetry (ops=RE)
+	// in its own right — a real detector originates an alarm state
+	// change on its own, independently of SMOKE_DETECTOR_COMMAND's
+	// test-trigger reset above. Single-key echo, same as the default
+	// fallback, kept explicit so the contract is documented and tested.
+	"SMOKE_DETECTOR_ALARM_STATUS": {TriggerParam: "SMOKE_DETECTOR_ALARM_STATUS", EchoTrigger: true},
+	// LOW_BAT lives on the MAINTENANCE channel (ch0) of every
+	// battery-powered HmIP device; PARENT_TYPE routes ch0 writes
+	// through the owning device type's table (see
+	// RPCFunctions.deviceTypeForAddressLocked), so it is registered
+	// here rather than under a synthetic "MAINTENANCE" entry.
+	"LOW_BAT": {TriggerParam: "LOW_BAT", EchoTrigger: true},
+}
+
+// motionSensor documents that HmIP-SMI's MOTION and CURRENT_ILLUMINATION
+// are read-only telemetry (ops=RE) a real sensor originates on its own.
+var motionSensor = map[string]ParameterResponse{
+	"MOTION":               {TriggerParam: "MOTION", EchoTrigger: true},
+	"CURRENT_ILLUMINATION": {TriggerParam: "CURRENT_ILLUMINATION", EchoTrigger: true},
+	"LOW_BAT":              {TriggerParam: "LOW_BAT", EchoTrigger: true},
+}
+
+// concentrationSensor documents that HmIP-SCTH230's CO2/VOC CONCENTRATION
+// reading is read-only telemetry (ops=RE) a real sensor originates on
+// its own.
+var concentrationSensor = map[string]ParameterResponse{
+	"CONCENTRATION": {TriggerParam: "CONCENTRATION", EchoTrigger: true},
 }
 
 var windowState = map[string]ParameterResponse{
@@ -185,6 +265,10 @@ var windowState = map[string]ParameterResponse{
 			return map[string]any{"STATE": v}
 		},
 	},
+	// LOW_BAT lives on the MAINTENANCE channel (ch0); see the comment
+	// on smokeDetectorTest's LOW_BAT entry above for why it belongs
+	// in the owning device type's table.
+	"LOW_BAT": {TriggerParam: "LOW_BAT", EchoTrigger: true},
 }
 
 var lockTargetLevel = map[string]ParameterResponse{
@@ -207,11 +291,19 @@ var lockTargetLevel = map[string]ParameterResponse{
 // Lookup uses an exact match first and then falls back to the longest
 // registered prefix that deviceType starts with — so "HmIP-PSM" still
 // resolves through the "HmIP-PS" entry even though the longer form is
-// not listed explicitly.
+// not listed explicitly. Both the exact and the prefix match are
+// case-insensitive: the embedded device-description fixtures spell the
+// TYPE attribute inconsistently (e.g. "HMIP-PS" in HMIP-PS.json vs.
+// "HmIP-BSM" in HmIP-BSM.json), while this table always uses the
+// marketing spelling, so a byte-exact comparison silently drops entries
+// like Mapping("HMIP-PS", "STATE").
 func Mapping(deviceType, param string) *ParameterResponse {
-	if m, ok := deviceResponseMappings[deviceType]; ok {
-		if r, ok := m[param]; ok {
-			return &r
+	for k, m := range deviceResponseMappings {
+		if strings.EqualFold(k, deviceType) {
+			if r, ok := m[param]; ok {
+				return &r
+			}
+			break
 		}
 	}
 	keys := make([]string, 0, len(deviceResponseMappings))
@@ -260,7 +352,7 @@ func startsWith(s, prefix string) bool {
 	if len(s) < len(prefix) {
 		return false
 	}
-	return s[:len(prefix)] == prefix
+	return strings.EqualFold(s[:len(prefix)], prefix)
 }
 
 func isZero(v any) bool {
