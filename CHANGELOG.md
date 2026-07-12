@@ -9,6 +9,8 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.1.8] — 2026-07-12
+
 ### Added
 
 - **System-variable channel assignment.** `SystemVariable` (and
