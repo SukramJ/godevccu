@@ -57,6 +57,11 @@ type SystemVariable struct {
 	MinValue    float64
 	MaxValue    float64
 	Timestamp   float64
+	// ChannelAddress is the channel this variable is explicitly assigned
+	// to in the CCU WebUI ("Kanalzuordnung"), e.g. "VCU0000123:1". Empty
+	// when unassigned. Surfaced by the ReGa description script the same
+	// way a real CCU resolves oVar.Channel() to the channel address.
+	ChannelAddress string
 }
 
 // Room is a CCU room with the channels assigned to it.
