@@ -4,6 +4,8 @@
 package rega_test
 
 import (
+	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -52,6 +54,64 @@ func TestSetSysVarFromScript(t *testing.T) {
 	sv, _ := st.SystemVariable("Presence")
 	if sv.Value != true {
 		t.Fatalf("sysvar = %v, want true", sv.Value)
+	}
+}
+
+func TestExecuteSysvarDescriptions(t *testing.T) {
+	st := state.New(hmconst.BackendModeOpenCCU, "TEST0001")
+	st.AddSystemVariable("Presence", "BOOL", false, state.AddSystemVariableOpts{
+		ID:          950,
+		Description: "HAHM",
+	})
+	st.AddSystemVariable("svEnergyCounter_14884_000858A994D482:7", "FLOAT", 0.0, state.AddSystemVariableOpts{
+		ID:             951,
+		ChannelAddress: "000858A994D482:7",
+	})
+	e := rega.New(st, nil)
+
+	// The description-script family walks ID_SYSTEM_VARIABLES AND calls
+	// .DPInfo() per variable — the dedicated handler must win over the
+	// generic sysvar handler and frame ids as strings.
+	res := e.Execute(`foreach (sVarId, dom.GetObject(ID_SYSTEM_VARIABLES).EnumIDs()) { object oVar = dom.GetObject(sVarId); Write(oVar.DPInfo().UriEncode()); }`)
+	if !res.Success {
+		t.Fatalf("execute failed: %s", res.Error)
+	}
+	var entries []struct {
+		ID             string `json:"id"`
+		Description    string `json:"description"`
+		ChannelAddress string `json:"channel_address"`
+	}
+	if err := json.Unmarshal([]byte(res.Output), &entries); err != nil {
+		t.Fatalf("output is not the description wire shape (string ids): %v — %s", err, res.Output)
+	}
+	byID := map[string]struct {
+		ID             string `json:"id"`
+		Description    string `json:"description"`
+		ChannelAddress string `json:"channel_address"`
+	}{}
+	for _, en := range entries {
+		byID[en.ID] = en
+	}
+	if got := byID["950"]; got.Description != "HAHM" || got.ChannelAddress != "" {
+		t.Fatalf("var 950 = %+v, want description HAHM and empty channel_address", got)
+	}
+	got := byID["951"]
+	decoded, err := url.QueryUnescape(got.ChannelAddress)
+	if err != nil {
+		t.Fatalf("channel_address not URL-decodable: %v", err)
+	}
+	if decoded != "000858A994D482:7" {
+		t.Fatalf("var 951 channel_address = %q, want 000858A994D482:7", decoded)
+	}
+}
+
+func TestExecuteSysvarsGenericStillAnswersWithoutDPInfo(t *testing.T) {
+	st := state.New(hmconst.BackendModeOpenCCU, "TEST0001")
+	st.AddSystemVariable("Presence", "BOOL", false, state.AddSystemVariableOpts{})
+	e := rega.New(st, nil)
+	res := e.Execute(`dom.GetObject(ID_SYSTEM_VARIABLES)`)
+	if !strings.Contains(res.Output, "Presence") {
+		t.Fatalf("generic sysvar handler output missing variable name: %q", res.Output)
 	}
 }
 

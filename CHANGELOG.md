@@ -9,6 +9,21 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added
+
+- **System-variable channel assignment.** `SystemVariable` (and
+  `AddSystemVariableOpts`) carry a `ChannelAddress` — the channel a
+  variable is explicitly assigned to in the CCU WebUI
+  ("Kanalzuordnung").
+- **Dedicated ReGa handler for the sysvar-description script family.**
+  Scripts that walk `ID_SYSTEM_VARIABLES` and call `.DPInfo()` per
+  variable are now answered in the real script's wire shape —
+  string-framed ids, URL-encoded `description`, plus the new
+  `channel_address` field (empty when unassigned). Previously these
+  scripts fell through to the generic sysvar handler, whose integer ids
+  failed consumers that decode the description shape.
+
+
 ## [0.1.7] — 2026-07-09
 
 ### Added

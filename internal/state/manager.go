@@ -220,6 +220,10 @@ type AddSystemVariableOpts struct {
 	MinValue    float64
 	MaxValue    float64
 	ID          int
+	// ChannelAddress marks the variable as explicitly assigned to a
+	// channel (CCU WebUI "Kanalzuordnung"); see
+	// [SystemVariable.ChannelAddress].
+	ChannelAddress string
 }
 
 // AddSystemVariable inserts a sysvar.
@@ -242,6 +246,8 @@ func (m *Manager) AddSystemVariable(name, varType string, value any, opts AddSys
 		MinValue:    opts.MinValue,
 		MaxValue:    opts.MaxValue,
 		Timestamp:   nowFloat(),
+
+		ChannelAddress: opts.ChannelAddress,
 	}
 	m.sysvars[id] = sv
 	m.sysvarByName[name] = sv

@@ -55,6 +55,7 @@ func New(stateMgr *state.Manager, rpc RPC) *Engine {
 		{regexp.MustCompile(`(?i)name:\s*fetch_all_device_data\.fn`), e.handleFetchDeviceData},
 		{regexp.MustCompile(`(?is)foreach\s*\(\s*\w+\s*,\s*dom\.GetObject\s*\(\s*ID_DATAPOINTS`), e.handleFetchDeviceData},
 		{regexp.MustCompile(`(?i)dom\.GetObject\s*\(\s*ID_PROGRAMS\s*\)`), e.handleGetPrograms},
+		{regexp.MustCompile(`(?i)\.DPInfo\s*\(\s*\)`), e.handleGetSysvarDescriptions},
 		{regexp.MustCompile(`(?i)dom\.GetObject\s*\(\s*ID_SYSTEM_VARIABLES\s*\)`), e.handleGetSysvars},
 		{regexp.MustCompile(`(?i)dom\.GetObject\s*\(\s*ID_SERVICES\s*\)`), e.handleGetServiceMessages},
 		{regexp.MustCompile(`(?i)INBOX`), e.handleGetInbox},
@@ -175,6 +176,28 @@ func (e *Engine) handleGetSysvars(_ string) string {
 			"maxValue":    sv.MaxValue,
 			"timestamp":   sv.Timestamp,
 			"isInternal":  false,
+		})
+	}
+	return mustJSON(out)
+}
+
+// handleGetSysvarDescriptions answers the sysvar-description script
+// family (loom's get_system_variable_descriptions.fn and equivalents):
+// scripts that walk ID_SYSTEM_VARIABLES and emit each variable's
+// DPInfo(). The real script frames ids as STRINGS and URL-encodes the
+// free-text fields; channel_address carries the CCU WebUI channel
+// assignment ("Kanalzuordnung", oVar.Channel() resolved to the channel
+// address) and is empty for unassigned variables. Registered ahead of
+// the generic ID_SYSTEM_VARIABLES handler so the description script is
+// answered in its own wire shape.
+func (e *Engine) handleGetSysvarDescriptions(_ string) string {
+	svs := e.state.SystemVariables()
+	out := make([]map[string]any, 0, len(svs))
+	for _, sv := range svs {
+		out = append(out, map[string]any{
+			"id":              strconv.Itoa(sv.ID),
+			"description":     url.QueryEscape(sv.Description),
+			"channel_address": url.QueryEscape(sv.ChannelAddress),
 		})
 	}
 	return mustJSON(out)
