@@ -53,6 +53,7 @@ func New(stateMgr *state.Manager, rpc RPC) *Engine {
 		{regexp.MustCompile(`(?i)\bget_serial(\.fn)?\b`), e.handleGetSerial},
 		{regexp.MustCompile(`(?i)system\.GetVar\s*\(\s*["']?SERIALNO["']?\s*\)`), e.handleGetSerial},
 		{regexp.MustCompile(`(?i)name:\s*fetch_all_device_data\.fn`), e.handleFetchDeviceData},
+		{regexp.MustCompile(`(?i)name:\s*get_alarm_messages\.fn`), e.handleGetAlarmMessages},
 		{regexp.MustCompile(`(?is)foreach\s*\(\s*\w+\s*,\s*dom\.GetObject\s*\(\s*ID_DATAPOINTS`), e.handleFetchDeviceData},
 		{regexp.MustCompile(`(?i)dom\.GetObject\s*\(\s*ID_PROGRAMS\s*\)`), e.handleGetPrograms},
 		{regexp.MustCompile(`(?i)\.DPInfo\s*\(\s*\)`), e.handleGetSysvarDescriptions},
@@ -201,6 +202,17 @@ func (e *Engine) handleGetSysvarDescriptions(_ string) string {
 		})
 	}
 	return mustJSON(out)
+}
+
+// handleGetAlarmMessages mirrors aiohomematic's get_alarm_messages.fn: the
+// script lists ID_SYSTEM_VARIABLES entries of TypeName ALARMDP with an
+// active AlState. godevccu's state does not model alarm datapoints, so the
+// active-alarm list is always empty — matching a real CCU without pending
+// alarms. Without this pattern the script's DPInfo()/ID_SYSTEM_VARIABLES
+// body is misrouted to the sysvar handlers, whose entries lack the "name"
+// key the alarm parser requires (KeyError, entry setup fails).
+func (e *Engine) handleGetAlarmMessages(_ string) string {
+	return "[]"
 }
 
 func (e *Engine) handleGetServiceMessages(_ string) string {

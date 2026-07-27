@@ -9,6 +9,19 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.1.9] — 2026-07-27
+
+### Fixed
+
+- **Dedicated ReGa handler for `get_alarm_messages.fn`.** aiohomematic's
+  alarm-message script walks `ID_SYSTEM_VARIABLES` and calls `.DPInfo()`,
+  so it was misrouted to the sysvar-description handlers, whose entries
+  lack the `name` key the alarm parser requires — a `KeyError` that failed
+  the consumer's entire entry setup. The script is now matched by its
+  `name:` header and answered with the empty active-alarm list (godevccu's
+  state does not model `ALARMDP` variables), matching a real CCU without
+  pending alarms.
+
 ## [0.1.8] — 2026-07-12
 
 ### Added
@@ -249,7 +262,10 @@ Initial release. A standalone Go port of
   and `3.87.1.20250130` in CCU/OpenCCU mode — identical to upstream
   pydevccu so clients that branch on the prefix keep working.
 
-[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/SukramJ/godevccu/compare/v0.1.8...v0.1.9
+[0.1.8]: https://github.com/SukramJ/godevccu/compare/v0.1.7...v0.1.8
+[0.1.7]: https://github.com/SukramJ/godevccu/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/SukramJ/godevccu/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/SukramJ/godevccu/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/SukramJ/godevccu/compare/v0.1.3...v0.1.4
