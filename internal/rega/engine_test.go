@@ -155,3 +155,17 @@ func TestExecuteBOMPrefixedScriptReturnsEmpty(t *testing.T) {
 		t.Fatalf("BOM-prefixed script output = %q, want empty (real CCU drops BOM scripts)", res.Output)
 	}
 }
+
+func TestExecuteAlarmMessages(t *testing.T) {
+	st := state.New(hmconst.BackendModeOpenCCU, "TEST0001")
+	e := rega.New(st, nil)
+	// The real aiohomematic script iterates ID_SYSTEM_VARIABLES and calls
+	// DPInfo(); the dedicated pattern must win over the sysvar handlers and
+	// return the empty active-alarm list.
+	res := e.Execute(`!# name: get_alarm_messages.fn
+object oSysvars = dom.GetObject(ID_SYSTEM_VARIABLES);
+string sDPInfo = oVar.DPInfo();`)
+	if res.Output != "[]" {
+		t.Fatalf("expected empty alarm list, got %q", res.Output)
+	}
+}
