@@ -45,10 +45,15 @@ const EphemeralPort = -1
 //   - <0 (use [EphemeralPort]) → bind an OS-assigned port; the
 //     resolved port is observable after [VirtualCCU.Start].
 type Config struct {
-	Mode          hmconst.BackendMode
-	Host          string
-	XMLRPCPort    int
-	JSONRPCPort   int
+	Mode        hmconst.BackendMode
+	Host        string
+	XMLRPCPort  int
+	JSONRPCPort int
+	// BINRPCPort enables the BIN-RPC (`xmlrpc_bin://`) listener, the
+	// transport CUxD speaks exclusively. 0 leaves it disabled — pydevccu
+	// has no CUxD, so a run only gets one when it asks. Accepts
+	// [EphemeralPort]; the resolved port is written back into [Config].
+	BINRPCPort    int
 	Username      string
 	Password      string
 	AuthEnabled   bool
@@ -188,6 +193,17 @@ func (v *VirtualCCU) XMLRPCAddr() net.Addr {
 	return v.xmlrpc.LocalAddr()
 }
 
+// BINRPCAddr returns the local BIN-RPC address, or nil when the run did
+// not enable the CUxD transport (only meaningful after Start).
+func (v *VirtualCCU) BINRPCAddr() net.Addr {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.xmlrpc == nil {
+		return nil
+	}
+	return v.xmlrpc.BINRPCLocalAddr()
+}
+
 // JSONRPCAddr returns the local JSON-RPC address (only after Start).
 func (v *VirtualCCU) JSONRPCAddr() net.Addr {
 	v.mu.Lock()
@@ -258,6 +274,23 @@ func (v *VirtualCCU) Start() error {
 		v.cfg.XMLRPCPort = addr.Port
 	}
 
+	// BIN-RPC is opt-in: only a run that configured a port gets the CUxD
+	// transport. EphemeralPort (<0) becomes 0 so the OS assigns one, and
+	// the resolved number is written back like XMLRPCPort's.
+	if v.cfg.BINRPCPort != 0 {
+		bindPort := v.cfg.BINRPCPort
+		if bindPort < 0 {
+			bindPort = 0
+		}
+		if err := v.xmlrpc.StartBINRPC(net.JoinHostPort(v.cfg.Host, strconv.Itoa(bindPort))); err != nil {
+			_ = v.xmlrpc.Stop()
+			return fmt.Errorf("virtualccu: bin-rpc start: %w", err)
+		}
+		if addr, ok := v.xmlrpc.BINRPCLocalAddr().(*net.TCPAddr); ok && addr != nil {
+			v.cfg.BINRPCPort = addr.Port
+		}
+	}
+
 	v.rega = rega.New(v.state, rpcFns)
 
 	if v.cfg.Mode != hmconst.BackendModeHomegear {
@@ -269,6 +302,7 @@ func (v *VirtualCCU) Start() error {
 		})
 		v.jsonrpc.SetReady(!v.cfg.StartNotReady)
 		if err := v.jsonrpc.Start(); err != nil {
+			_ = v.xmlrpc.StopBINRPC()
 			_ = v.xmlrpc.Stop()
 			return fmt.Errorf("virtualccu: json-rpc start: %w", err)
 		}
@@ -324,6 +358,9 @@ func (v *VirtualCCU) Stop() error {
 		}
 	}
 	if xmlSrv != nil {
+		if err := xmlSrv.StopBINRPC(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 		if err := xmlSrv.Stop(); err != nil && firstErr == nil {
 			firstErr = err
 		}
