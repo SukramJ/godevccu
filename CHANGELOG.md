@@ -9,6 +9,8 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.1.10] — 2026-08-05
+
 ### Added
 
 - **BIN-RPC transport (`xmlrpc_bin://`), the protocol CUxD speaks
@@ -287,7 +289,8 @@ Initial release. A standalone Go port of
   and `3.87.1.20250130` in CCU/OpenCCU mode — identical to upstream
   pydevccu so clients that branch on the prefix keep working.
 
-[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/SukramJ/godevccu/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/SukramJ/godevccu/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/SukramJ/godevccu/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/SukramJ/godevccu/compare/v0.1.6...v0.1.7
