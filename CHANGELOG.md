@@ -9,6 +9,31 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added
+
+- **BIN-RPC transport (`xmlrpc_bin://`), the protocol CUxD speaks
+  exclusively.** Opt in with `Config.BINRPCPort` (`EphemeralPort` is
+  supported and the resolved port is written back, as for the other
+  listeners); left at 0 nothing changes. The listener serves the same
+  method set as the XML-RPC surface, so `listDevices`, `getValue`,
+  `setValue`, `ping` and `init` all answer over it.
+
+  This is a deliberate extension beyond pydevccu parity: pydevccu has
+  neither BIN-RPC nor CUxD. It exists because the CUxD callback direction
+  was otherwise untestable without real hardware, and that gap is not
+  theoretical — it hid a defect in a downstream consumer for the
+  consumer's entire lifetime.
+
+  The behaviour that matters is the callback direction: **every callback
+  to a `xmlrpc_bin://` receiver is wrapped in a `system.multicall`
+  envelope**, as real CUxD does, even for a single event. A consumer that
+  reads the interface id out of `params[0]` finds a string for a bare call
+  and the sub-call array for an envelope — so a simulator that pushed bare
+  calls would let a consumer that cannot parse the envelope pass every
+  test while dropping every real event.
+
+  `VirtualCCU.BINRPCAddr()` reports the bound address.
+
 ## [0.1.9] — 2026-07-27
 
 ### Fixed

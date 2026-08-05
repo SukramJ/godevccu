@@ -29,6 +29,8 @@ type Server struct {
 	httpSrv  *http.Server
 	listener net.Listener
 
+	binrpc binrpcState
+
 	mu          sync.Mutex
 	logics      []devicelogic.Device
 	running     bool

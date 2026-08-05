@@ -14,6 +14,10 @@ Goals:
 
 1. **Identical wire-level behaviour** to `pydevccu` over both XML-RPC
    and JSON-RPC. Tests in either repo should produce the same answers.
+   `internal/binrpc` is the one deliberate exception: pydevccu has no
+   BIN-RPC and no CUxD, so that transport models real CUxD instead —
+   including its `system.multicall` callback envelope. Keep it opt-in
+   (`Config.BINRPCPort`) so a default run stays pydevccu-shaped.
 2. **Single static binary** (`CGO_ENABLED=0`). No platform-specific
    build steps.
 3. **Embedded device definitions** (via `//go:embed`) — no runtime
@@ -60,6 +64,7 @@ The packages mirror the pydevccu modules:
 |--------------------------------|-----------------------------------|
 | `internal/hmconst`             | `pydevccu/const.py`               |
 | `internal/xmlrpc`              | `xmlrpc.server` / `xmlrpc.client` |
+| `internal/binrpc`              | — (no pydevccu counterpart)       |
 | `internal/ccu`                 | `pydevccu/ccu.py`                 |
 | `internal/state`               | `pydevccu/state/`                 |
 | `internal/session`             | `pydevccu/session.py`             |

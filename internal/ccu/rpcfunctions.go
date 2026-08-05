@@ -61,7 +61,7 @@ type RPCFunctions struct {
 	linkParamsets map[linkKey]map[string]any
 
 	// callback wiring
-	remotes           map[string]*xmlrpc.Client
+	remotes           map[string]remoteCaller
 	paramsetCallbacks []EventCallback
 
 	// onSetValue is invoked synchronously after every successful
@@ -160,7 +160,7 @@ func NewRPCFunctions(opts Options) (*RPCFunctions, error) {
 		paramsetCompiled:   make(map[paramsetKey]map[string]any),
 		paramsetDirty:      make(map[paramsetKey]struct{}),
 		linkParamsets:      make(map[linkKey]map[string]any),
-		remotes:            make(map[string]*xmlrpc.Client),
+		remotes:            make(map[string]remoteCaller),
 		onSetValue:         opts.OnSetValue,
 	}
 
@@ -269,7 +269,7 @@ func (r *RPCFunctions) AddDevices(ctx context.Context, devices []string) error {
 		return nil
 	}
 	r.mu.Lock()
-	remotes := make(map[string]*xmlrpc.Client, len(r.remotes))
+	remotes := make(map[string]remoteCaller, len(r.remotes))
 	for k, v := range r.remotes {
 		remotes[k] = v
 	}
@@ -335,7 +335,7 @@ func (r *RPCFunctions) DeleteDevice(ctx context.Context, address string, _ int) 
 		return
 	}
 
-	remotes := make(map[string]*xmlrpc.Client, len(r.remotes))
+	remotes := make(map[string]remoteCaller, len(r.remotes))
 	for k, v := range r.remotes {
 		remotes[k] = v
 	}
@@ -387,7 +387,7 @@ func (r *RPCFunctions) RemoveDevices(ctx context.Context, devices []string) {
 		r.devices = filtered
 	}
 
-	remotes := make(map[string]*xmlrpc.Client, len(r.remotes))
+	remotes := make(map[string]remoteCaller, len(r.remotes))
 	for k, v := range r.remotes {
 		remotes[k] = v
 	}
@@ -410,7 +410,7 @@ func (r *RPCFunctions) RemoveDevices(ctx context.Context, devices []string) {
 // wire shape is (interfaceID, oldDeviceAddress, newDeviceAddress).
 func (r *RPCFunctions) ReplaceDevice(ctx context.Context, oldAddress, newAddress string) {
 	r.mu.Lock()
-	remotes := make(map[string]*xmlrpc.Client, len(r.remotes))
+	remotes := make(map[string]remoteCaller, len(r.remotes))
 	for k, v := range r.remotes {
 		remotes[k] = v
 	}
@@ -434,7 +434,7 @@ func (r *RPCFunctions) ReplaceDevice(ctx context.Context, oldAddress, newAddress
 // of the re-add. The wire shape is (interfaceID, addresses[]).
 func (r *RPCFunctions) ReaddedDevice(ctx context.Context, addresses []string) {
 	r.mu.Lock()
-	remotes := make(map[string]*xmlrpc.Client, len(r.remotes))
+	remotes := make(map[string]remoteCaller, len(r.remotes))
 	for k, v := range r.remotes {
 		remotes[k] = v
 	}
@@ -832,7 +832,7 @@ func (r *RPCFunctions) fireEvent(interfaceID, address, valueKey string, value an
 	addrUp := strings.ToUpper(address)
 	r.mu.Lock()
 	cbs := append([]EventCallback(nil), r.paramsetCallbacks...)
-	remotes := make(map[string]*xmlrpc.Client, len(r.remotes))
+	remotes := make(map[string]remoteCaller, len(r.remotes))
 	for k, v := range r.remotes {
 		remotes[k] = v
 	}
@@ -861,7 +861,7 @@ func (r *RPCFunctions) fireEvent(interfaceID, address, valueKey string, value an
 // interfaceID is empty.
 func (r *RPCFunctions) Init(url, interfaceID string) string {
 	if interfaceID != "" {
-		client := xmlrpc.NewClient(url)
+		client := newRemote(url)
 		r.mu.Lock()
 		r.remotes[interfaceID] = client
 		r.mu.Unlock()

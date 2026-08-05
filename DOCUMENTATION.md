@@ -14,13 +14,14 @@ CCU/OpenCCU simulation with the JSON-RPC web API.
 3. [State manager](#state-manager)
 4. [Session management](#session-management)
 5. [XML-RPC layer](#xml-rpc-layer)
-6. [JSON-RPC layer](#json-rpc-layer)
-7. [ReGa script engine](#rega-script-engine)
-8. [Device definitions](#device-definitions)
-9. [Device behaviour simulators](#device-behaviour-simulators)
-10. [Configuration](#configuration)
-11. [Persistence](#persistence)
-12. [Example workflows](#example-workflows)
+6. [BIN-RPC layer (CUxD)](#bin-rpc-layer-cuxd)
+7. [JSON-RPC layer](#json-rpc-layer)
+8. [ReGa script engine](#rega-script-engine)
+9. [Device definitions](#device-definitions)
+10. [Device behaviour simulators](#device-behaviour-simulators)
+11. [Configuration](#configuration)
+12. [Persistence](#persistence)
+13. [Example workflows](#example-workflows)
 
 ---
 
@@ -179,6 +180,56 @@ Plus the system methods `system.listMethods`, `system.methodHelp`,
 
 ---
 
+## BIN-RPC layer (CUxD)
+
+`internal/binrpc` implements the HomeMatic BIN-RPC wire protocol —
+`xmlrpc_bin://`, the binary sibling of XML-RPC that CUxD speaks
+exclusively. It reuses `xmlrpc.Value`, since BIN-RPC carries the same
+value set and differs only in framing.
+
+**This is a deliberate extension beyond pydevccu parity.** pydevccu has
+neither BIN-RPC nor CUxD. The transport exists because the CUxD callback
+direction is otherwise untestable without real hardware.
+
+Enable it with `Config.BINRPCPort` (0 disables it, `EphemeralPort` binds
+an OS-assigned port and writes the resolved number back into the config).
+`VirtualCCU.BINRPCAddr()` reports the bound address. The listener serves
+the same `Mux` as the XML-RPC surface, so the whole method set answers
+over BIN-RPC too.
+
+### Callbacks are wrapped in `system.multicall`
+
+The behaviour worth knowing: **every** callback pushed to a
+`xmlrpc_bin://` receiver is wrapped in a `system.multicall` envelope,
+exactly as real CUxD does — a single value change included.
+
+```
+system.multicall([
+  {methodName: "event",
+   params: ["<interface_id>", "<address>", "<parameter>", <value>]}
+])
+```
+
+The interface id therefore lives **inside** the sub-call, not in the
+envelope's `params[0]`. A consumer that reads `params[0]` as the
+interface id sees a string for a bare call and an array for an envelope.
+That distinction is the reason this transport is modelled at all: a
+simulator pushing bare calls would let such a consumer pass every test
+while dropping every real CUxD event.
+
+Wire encoding notes:
+
+- Big-endian throughout; 8-byte header `'B' 'i' 'n' <msgType> <size:u32>`.
+- Strings are ISO-8859-1. A rune above U+00FF is refused rather than
+  silently substituted — a mangled device name is harder to trace than a
+  refused encode.
+- Doubles use BIN-RPC's `mantissa * 2^exp / 2^30` representation.
+- Decoding bounds message size, nesting depth, and element/member counts
+  against the remaining payload, so a crafted frame cannot drive an
+  oversized allocation or unbounded recursion.
+
+---
+
 ## JSON-RPC layer
 
 Endpoint: **`POST /api/homematic.cgi`**.
@@ -286,6 +337,7 @@ type Config struct {
     Host          string           // Default: "127.0.0.1"
     XMLRPCPort    int              // Default: 2001
     JSONRPCPort   int              // Default: 80
+    BINRPCPort    int              // Default: 0 = BIN-RPC/CUxD disabled
     Username      string           // Default: "Admin"
     Password      string
     AuthEnabled   bool
