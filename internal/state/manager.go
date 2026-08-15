@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/SukramJ/godevccu/internal/hmconst"
 )
@@ -45,13 +46,20 @@ type Manager struct {
 
 	inboxDevices []*InboxDevice
 
-	backupStatus BackupStatus
-	backupData   []byte
+	backupStatus    BackupStatus
+	backupData      []byte
+	backupDelay     time.Duration
+	backupStartedAt time.Time
 
 	updateInfo UpdateInfo
 
 	deviceValues map[string]any
 	deviceNames  map[string]string
+
+	// ReGa object ids for device and channel addresses; see regaids.go.
+	regaIDByAddress map[string]int
+	regaAddressByID map[int]string
+	nextRegaID      int
 
 	sysvarCallbacks  []SysVarCallback
 	programCallbacks []ProgramCallback
@@ -79,6 +87,9 @@ func New(mode hmconst.BackendMode, serial string) *Manager {
 		updateInfo:      NewUpdateInfo(),
 		deviceValues:    make(map[string]any),
 		deviceNames:     make(map[string]string),
+		regaIDByAddress: make(map[string]int),
+		regaAddressByID: make(map[int]string),
+		nextRegaID:      regaDeviceIDBase,
 	}
 }
 
@@ -220,6 +231,17 @@ type AddSystemVariableOpts struct {
 	MinValue    float64
 	MaxValue    float64
 	ID          int
+	// Internal marks a CCU-maintained variable; see
+	// [SystemVariable.Internal].
+	Internal bool
+	// Logged enables value logging for the variable.
+	Logged bool
+	// Hidden inverts [SystemVariable.Visible], so the zero value of
+	// this struct produces a visible variable.
+	Hidden bool
+	// ValueName0 and ValueName1 label the states of a LOGIC variable.
+	ValueName0 string
+	ValueName1 string
 	// ChannelAddress marks the variable as explicitly assigned to a
 	// channel (CCU WebUI "Kanalzuordnung"); see
 	// [SystemVariable.ChannelAddress].
@@ -248,6 +270,11 @@ func (m *Manager) AddSystemVariable(name, varType string, value any, opts AddSys
 		Timestamp:   nowFloat(),
 
 		ChannelAddress: opts.ChannelAddress,
+		Internal:       opts.Internal,
+		Visible:        !opts.Hidden,
+		Logged:         opts.Logged,
+		ValueName0:     opts.ValueName0,
+		ValueName1:     opts.ValueName1,
 	}
 	m.sysvars[id] = sv
 	m.sysvarByName[name] = sv
@@ -580,6 +607,7 @@ func (m *Manager) StartBackup() string {
 	defer m.mu.Unlock()
 	pid := randomID(4)
 	m.backupStatus = BackupStatus{Status: "running", PID: pid}
+	m.backupStartedAt = time.Now()
 	return pid
 }
 
@@ -603,17 +631,20 @@ func (m *Manager) FailBackup(_ string) {
 	m.backupStatus = BackupStatus{Status: "failed"}
 }
 
-// BackupStatus returns the current backup status.
+// BackupStatus returns the current backup status, completing a running
+// backup whose configured duration has elapsed; see backup.go.
 func (m *Manager) BackupStatus() BackupStatus {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.promoteBackupLocked()
 	return m.backupStatus
 }
 
 // BackupData returns the backup payload (empty before completion).
 func (m *Manager) BackupData() []byte {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.promoteBackupLocked()
 	return append([]byte(nil), m.backupData...)
 }
 

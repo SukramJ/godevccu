@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/SukramJ/godevccu/internal/converter"
 	"github.com/SukramJ/godevccu/internal/deviceresponses"
@@ -39,6 +40,9 @@ type RPCFunctions struct {
 
 	version     string
 	interfaceID string
+	// interfaceFilter restricts this instance to one protocol family;
+	// see [Options.InterfaceFilter].
+	interfaceFilter string
 
 	persistence     bool
 	persistencePath string
@@ -60,6 +64,15 @@ type RPCFunctions struct {
 	// Populated by AddLink; dropped by RemoveLink.
 	linkParamsets map[linkKey]map[string]any
 
+	// linkInfo holds the name/description a client attaches to a direct
+	// link via setLinkInfo, keyed like linkParamsets.
+	linkInfo map[linkKey]linkDetails
+
+	// metadata is the object-id → data-id → value store behind
+	// getMetadata/setMetadata. Writes used to be discarded, which made
+	// a set→get round trip impossible.
+	metadata map[string]map[string]any
+
 	// callback wiring
 	remotes           map[string]remoteCaller
 	paramsetCallbacks []EventCallback
@@ -71,6 +84,24 @@ type RPCFunctions struct {
 	onSetValue func(address, valueKey string, value any)
 
 	knownDevices []map[string]any
+
+	// persistInit keeps callback registrations across restarts; see
+	// initpersistence.go.
+	persistInit bool
+
+	// Batched, asynchronous event delivery; see dispatcher.go.
+	batchEvents bool
+	dispatchers map[string]*dispatcher
+
+	// Service messages; see servicemessages.go.
+	serviceMessages bool
+	suppressed      map[string]map[string]struct{}
+
+	// Device state machines; see reachability.go.
+	reachability        bool
+	configPendingFor    time.Duration
+	configPendingTimers map[string]*time.Timer
+	timersStopped       bool
 
 	// runtime flag toggled by the surrounding ServerThread.
 	active bool
@@ -86,6 +117,13 @@ type paramsetKey struct {
 type linkKey struct {
 	sender   string
 	receiver string
+}
+
+// linkDetails is the name/description pair a CCU stores per direct link
+// and returns from getLinkInfo.
+type linkDetails struct {
+	name        string
+	description string
 }
 
 // Options is the constructor argument set for [NewRPCFunctions].
@@ -106,6 +144,12 @@ type Options struct {
 	// InterfaceID is the identifier the simulator reports to remote
 	// callbacks; defaults to "godevccu".
 	InterfaceID string
+	// InterfaceFilter restricts the loaded catalogue to the devices of
+	// one protocol family ("BidCos-RF", "HmIP-RF", "BidCos-Wired",
+	// "VirtualDevices"), classified by type prefix. Empty loads
+	// everything into one instance, which is the single-endpoint
+	// behaviour. See [hmconst.InterfaceForType].
+	InterfaceFilter string
 	// Logger sinks structured log output. Defaults to slog.Default().
 	Logger *slog.Logger
 	// OnSetValue is invoked after every successful SetValue /
@@ -146,22 +190,28 @@ func NewRPCFunctions(opts Options) (*RPCFunctions, error) {
 	}
 
 	rpc := &RPCFunctions{
-		logger:             logger,
-		version:            version,
-		interfaceID:        ifID,
-		persistence:        opts.Persistence,
-		persistencePath:    persistencePath,
-		deviceByAddress:    make(map[string]map[string]any),
-		paramsetDescByAddr: make(map[string]map[string]any),
-		supportedDevices:   make(map[string]string),
-		activeDevices:      make(map[string]struct{}),
-		paramsets:          make(map[string]map[string]map[string]any),
-		paramsetDefaults:   make(map[paramsetKey]map[string]any),
-		paramsetCompiled:   make(map[paramsetKey]map[string]any),
-		paramsetDirty:      make(map[paramsetKey]struct{}),
-		linkParamsets:      make(map[linkKey]map[string]any),
-		remotes:            make(map[string]remoteCaller),
-		onSetValue:         opts.OnSetValue,
+		logger:              logger,
+		version:             version,
+		interfaceID:         ifID,
+		persistence:         opts.Persistence,
+		interfaceFilter:     opts.InterfaceFilter,
+		persistencePath:     persistencePath,
+		deviceByAddress:     make(map[string]map[string]any),
+		paramsetDescByAddr:  make(map[string]map[string]any),
+		supportedDevices:    make(map[string]string),
+		activeDevices:       make(map[string]struct{}),
+		paramsets:           make(map[string]map[string]map[string]any),
+		paramsetDefaults:    make(map[paramsetKey]map[string]any),
+		paramsetCompiled:    make(map[paramsetKey]map[string]any),
+		paramsetDirty:       make(map[paramsetKey]struct{}),
+		linkParamsets:       make(map[linkKey]map[string]any),
+		linkInfo:            make(map[linkKey]linkDetails),
+		metadata:            make(map[string]map[string]any),
+		remotes:             make(map[string]remoteCaller),
+		configPendingTimers: make(map[string]*time.Timer),
+		suppressed:          make(map[string]map[string]struct{}),
+		dispatchers:         make(map[string]*dispatcher),
+		onSetValue:          opts.OnSetValue,
 	}
 
 	if _, err := rpc.loadDevices(opts.Devices); err != nil {
@@ -237,6 +287,12 @@ func (r *RPCFunctions) loadDevices(restrict []string) ([]map[string]any, error) 
 	added := make([]map[string]any, 0)
 	for _, s := range sets {
 		if _, dup := r.activeDevices[s.deviceTypeKey]; dup {
+			continue
+		}
+		// With an interface filter set this instance only serves the
+		// devices of one protocol family, the way a CCU's rfd,
+		// HMIPServer and hs485d each serve their own.
+		if r.interfaceFilter != "" && hmconst.InterfaceForType(s.deviceTypeKey) != r.interfaceFilter {
 			continue
 		}
 		r.devices = append(r.devices, s.devices...)
@@ -492,8 +548,38 @@ func (r *RPCFunctions) ListDevices() []map[string]any {
 	return out
 }
 
-// Ping mirrors RPCFunctions.ping.
-func (r *RPCFunctions) Ping(_ string) bool { return true }
+// Ping mirrors RPCFunctions.ping. A real CCU answers true and then
+// delivers a CENTRAL/PONG event carrying the caller's id back to the
+// registered client — that event is how a client matches its ping and
+// keeps its connection state healthy. Without it aiohomematic reports a
+// permanent PING_PONG_MISMATCH.
+//
+// The caller id has the shape "<interface_id>#<token>"; the event goes
+// to the remote that owns the interface, or to all remotes when the id
+// carries no routable prefix.
+func (r *RPCFunctions) Ping(callerID string) bool {
+	r.firePong(callerID)
+	return true
+}
+
+func (r *RPCFunctions) firePong(callerID string) {
+	if callerID == "" {
+		return
+	}
+	target := callerID
+	if idx := strings.Index(callerID, "#"); idx > 0 {
+		target = callerID[:idx]
+	}
+	r.mu.Lock()
+	_, addressed := r.remotes[target]
+	r.mu.Unlock()
+
+	if addressed {
+		r.fireEventTo(target, target, hmconst.CentralAddress, hmconst.AttrPong, callerID)
+		return
+	}
+	r.fireEvent(target, hmconst.CentralAddress, hmconst.AttrPong, callerID)
+}
 
 // GetVersion returns the configured version string.
 func (r *RPCFunctions) GetVersion() string { return r.version }
@@ -504,12 +590,22 @@ func (r *RPCFunctions) GetServiceMessages() [][]any {
 	return [][]any{{"VCU0000001:1", hmconst.AttrError, 7}}
 }
 
-// ListBidcosInterfaces returns the BidCoS interface inventory. The simulator
-// models no physical radio gateways, so it returns an empty list — enough for
-// callers that probe the method during interface detection without asserting
-// on concrete gateway entries.
+// ListBidcosInterfaces returns the BidCoS gateway inventory. A real CCU
+// always reports at least its built-in radio module, and clients read
+// DUTY_CYCLE and CONNECTED from that entry — an empty list left them
+// with no gateway at all. The field names are the XML-RPC spelling the
+// CCU's JSON layer maps to address/dutyCycle/isConnected/isDefault/
+// fwVersion/type.
 func (r *RPCFunctions) ListBidcosInterfaces() []map[string]any {
-	return []map[string]any{}
+	return []map[string]any{{
+		hmconst.AttrAddress:     r.interfaceID,
+		hmconst.AttrDescription: "eQ-3 Default",
+		"DUTY_CYCLE":            0,
+		"CONNECTED":             true,
+		"DEFAULT":               true,
+		"FIRMWARE_VERSION":      hmconst.CCUFirmwareVersion,
+		hmconst.AttrType:        "CCU2",
+	}}
 }
 
 // GetAllSystemVariables returns the same hard-coded test data as the
@@ -819,6 +915,12 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 			hook(address, valueKey, value)
 		}
 	}
+	if paramsetKey == hmconst.ParamsetAttrMaster && len(paramset) > 0 {
+		// A configuration write does not take effect immediately: the
+		// device has to pick it up, and the CCU reports that window as
+		// CONFIG_PENDING on channel 0.
+		r.notifyConfigPending(address)
+	}
 	return nil
 }
 
@@ -829,17 +931,47 @@ func (r *RPCFunctions) FireEvent(interfaceID, address, valueKey string, value an
 }
 
 func (r *RPCFunctions) fireEvent(interfaceID, address, valueKey string, value any) {
+	r.dispatchEvent("", interfaceID, address, valueKey, value)
+}
+
+// fireEventTo delivers an event to a single registered remote, the way
+// a CCU answers a ping only towards the interface that sent it.
+func (r *RPCFunctions) fireEventTo(target, interfaceID, address, valueKey string, value any) {
+	r.dispatchEvent(target, interfaceID, address, valueKey, value)
+}
+
+// dispatchEvent notifies the in-process callbacks and every registered
+// remote; when target is non-empty only that remote is called.
+func (r *RPCFunctions) dispatchEvent(target, interfaceID, address, valueKey string, value any) {
 	addrUp := strings.ToUpper(address)
 	r.mu.Lock()
 	cbs := append([]EventCallback(nil), r.paramsetCallbacks...)
 	remotes := make(map[string]remoteCaller, len(r.remotes))
 	for k, v := range r.remotes {
+		if target != "" && k != target {
+			continue
+		}
 		remotes[k] = v
 	}
+	batched := r.batchEvents
 	r.mu.Unlock()
 
 	for _, cb := range cbs {
 		safeCallEvent(cb, interfaceID, addrUp, valueKey, value)
+	}
+	if batched {
+		for ifID, client := range remotes {
+			r.mu.Lock()
+			d := r.dispatcherFor(ifID, client)
+			r.mu.Unlock()
+			d.enqueue(pendingEvent{
+				interfaceID: ifID,
+				address:     addrUp,
+				valueKey:    valueKey,
+				value:       value,
+			})
+		}
+		return
 	}
 	for ifID, client := range remotes {
 		params := []xmlrpc.Value{
@@ -850,9 +982,16 @@ func (r *RPCFunctions) fireEvent(interfaceID, address, valueKey string, value an
 		}
 		if _, err := client.Call(context.Background(), "event", params); err != nil {
 			r.logger.Debug("ccu: callback event failed", "interface", ifID, "err", err)
-			r.mu.Lock()
-			delete(r.remotes, ifID)
-			r.mu.Unlock()
+			// Only a transport problem means the client is gone. A
+			// fault is the client answering — it stays registered, the
+			// way a real CCU keeps delivering after an application
+			// error. Dropping the remote on the first fault made the
+			// simulator stricter than both the CCU and pydevccu.
+			if xmlrpc.IsTransport(err) {
+				r.mu.Lock()
+				delete(r.remotes, ifID)
+				r.mu.Unlock()
+			}
 		}
 	}
 }
@@ -994,6 +1133,13 @@ func (r *RPCFunctions) GetMetadata(objectID, dataID string) (any, error) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// A previously written value wins over the description default,
+	// the way a CCU serves what was last stored for the object.
+	if stored, ok := r.metadata[strings.ToUpper(objectID)]; ok {
+		if v, ok := stored[dataID]; ok {
+			return v, nil
+		}
+	}
 	d, ok := r.deviceByAddress[addr]
 	if !ok {
 		return nil, fmt.Errorf("%w: device %q not found", ErrRPC, objectID)
@@ -1013,8 +1159,147 @@ func (r *RPCFunctions) GetMetadata(objectID, dataID string) (any, error) {
 	return nil, nil
 }
 
-// SetMetadata accepts and discards metadata writes.
-func (r *RPCFunctions) SetMetadata(_, _ string, _ any) bool { return true }
+// SetMetadata stores a metadata value for an object. Writes used to be
+// discarded, so a client could never read back what it had written —
+// the CCU WebUI builds on exactly that round trip (operateGroupOnly,
+// channelMode).
+func (r *RPCFunctions) SetMetadata(objectID, dataID string, value any) bool {
+	if objectID == "" || dataID == "" {
+		return false
+	}
+	key := strings.ToUpper(objectID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stored, ok := r.metadata[key]
+	if !ok {
+		stored = make(map[string]any)
+		r.metadata[key] = stored
+	}
+	stored[dataID] = value
+	return true
+}
+
+// GetAllMetadata returns every stored metadata value for an object.
+func (r *RPCFunctions) GetAllMetadata(objectID string) map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]any)
+	for k, v := range r.metadata[strings.ToUpper(objectID)] {
+		out[k] = v
+	}
+	return out
+}
+
+// DetermineParameter asks the CCU to re-read a parameter from the
+// device. A real CCU answers true and delivers the freshly determined
+// value as an event; the simulator replays the cached value so a client
+// observes the same round trip. paramsetKey is optional — clients call
+// this with either two or three arguments.
+// The paramset key is accepted but not evaluated: only VALUES
+// parameters carry a device-side value that could be re-read.
+func (r *RPCFunctions) DetermineParameter(address, paramsetKey, parameterID string) (bool, error) {
+	if parameterID == "" {
+		// Two-argument form: the second argument is the parameter.
+		parameterID = paramsetKey
+	}
+	if parameterID == "" {
+		return false, fmt.Errorf("%w: parameter required", ErrRPC)
+	}
+	value, err := r.GetValue(address, parameterID)
+	if err != nil {
+		return false, err
+	}
+	r.fireEvent(r.interfaceID, address, parameterID, value)
+	return true, nil
+}
+
+// GetParamsetID returns the identifier of a channel's paramset. Clients
+// use it to decide whether a cached paramset description is still
+// valid, so it only has to be stable and unique per (type, paramset) —
+// the CCU's own encoding is not observable through the API.
+func (r *RPCFunctions) GetParamsetID(address, paramsetType string) (string, error) {
+	addrUp := strings.ToUpper(address)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	d, ok := r.deviceByAddress[addrUp]
+	if !ok {
+		return "", fmt.Errorf("%w: device %q not found", ErrRPC, address)
+	}
+	typeStr, _ := d[hmconst.AttrType].(string)
+	if typeStr == "" {
+		typeStr, _ = d[hmconst.AttrParentType].(string)
+	}
+	return typeStr + ":" + strings.ToUpper(paramsetType), nil
+}
+
+// ActivateLinkParamset activates a link paramset for the given peer.
+// The simulator holds no radio state, so it validates the pair and
+// reports success the way a CCU does once the command is queued.
+func (r *RPCFunctions) ActivateLinkParamset(address, peerAddress string, _ bool) (bool, error) {
+	lk := linkKey{sender: strings.ToUpper(address), receiver: strings.ToUpper(peerAddress)}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.linkParamsets[lk]; !ok {
+		// Links are directional in storage but activatable from either
+		// end.
+		if _, ok := r.linkParamsets[linkKey{sender: lk.receiver, receiver: lk.sender}]; !ok {
+			return false, fmt.Errorf("%w: no link between %q and %q", ErrRPC, address, peerAddress)
+		}
+	}
+	return true, nil
+}
+
+// GetLinkInfo returns the name and description stored for a direct link.
+func (r *RPCFunctions) GetLinkInfo(senderAddress, receiverAddress string) (map[string]any, error) {
+	lk := linkKey{sender: strings.ToUpper(senderAddress), receiver: strings.ToUpper(receiverAddress)}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.linkParamsets[lk]; !ok {
+		return nil, fmt.Errorf("%w: no link between %q and %q", ErrRPC, senderAddress, receiverAddress)
+	}
+	info := r.linkInfo[lk]
+	return map[string]any{
+		hmconst.AttrName:        info.name,
+		hmconst.AttrDescription: info.description,
+	}, nil
+}
+
+// SetLinkInfo stores the name and description of a direct link.
+func (r *RPCFunctions) SetLinkInfo(senderAddress, receiverAddress, name, description string) (bool, error) {
+	lk := linkKey{sender: strings.ToUpper(senderAddress), receiver: strings.ToUpper(receiverAddress)}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.linkParamsets[lk]; !ok {
+		return false, fmt.Errorf("%w: no link between %q and %q", ErrRPC, senderAddress, receiverAddress)
+	}
+	r.linkInfo[lk] = linkDetails{name: name, description: description}
+	return true, nil
+}
+
+// RssiInfo reports the receive field strengths between the central and
+// every known device: device address → partner → [rssi_device,
+// rssi_partner]. The simulator has no radio, so it reports a constant
+// healthy value per known root device — enough for a client to exercise
+// the nested struct-of-struct parsing this method is known for.
+func (r *RPCFunctions) RssiInfo() map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]any, len(r.devices))
+	for _, d := range r.devices {
+		addr, _ := d[hmconst.AttrAddress].(string)
+		if addr == "" || strings.Contains(addr, ":") {
+			continue // channels carry no RSSI of their own
+		}
+		out[addr] = map[string]any{
+			hmconst.CentralAddress: []any{simulatedRssi, simulatedRssi},
+		}
+	}
+	return out
+}
+
+// simulatedRssi is the constant field strength the simulator reports;
+// a plausible "good reception" value on a real installation.
+const simulatedRssi = -65
 
 // AddLink records a link between sender and receiver and allocates a default
 // LINK paramset for the pair (built from the sender channel's LINK description,

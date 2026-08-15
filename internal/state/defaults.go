@@ -65,3 +65,43 @@ func SetupDefaults(m *Manager) {
 	SetupDefaultRooms(m)
 	SetupDefaultFunctions(m)
 }
+
+// SetupBuiltinSysvars seeds the system variables a real CCU maintains
+// itself, alongside whatever the fixture set already added.
+//
+// A factory CCU ships four internal variables, and clients special-case
+// them: ${sysVarPresence} is renamed to PRESENCE, and the ids 40 and 41
+// are skipped outright because they carry the alarm and service-message
+// *counts* rather than user-facing state. None of those code paths are
+// reachable against a simulator that only has fixture variables, so the
+// handling stays untested where it matters most.
+//
+// The ids are the real ones — a client keys its special cases on them.
+func SetupBuiltinSysvars(m *Manager) {
+	m.AddSystemVariable("${sysVarAlarmZone1}", "BOOL", false, AddSystemVariableOpts{
+		ID:          38,
+		Description: "Alarmzone 1",
+		Internal:    true,
+		ValueName0:  "nicht ausgelöst",
+		ValueName1:  "ausgelöst",
+	})
+	m.AddSystemVariable("${sysVarPresence}", "BOOL", false, AddSystemVariableOpts{
+		ID:          39,
+		Description: "Anwesenheit",
+		Internal:    true,
+		ValueName0:  "nicht anwesend",
+		ValueName1:  "anwesend",
+	})
+	m.AddSystemVariable("${sysVarAlarmMessages}", "FLOAT", 0.0, AddSystemVariableOpts{
+		ID:          40,
+		Description: "Alarmmeldungen",
+		Internal:    true,
+		MaxValue:    255,
+	})
+	m.AddSystemVariable("${sysVarServiceMessages}", "FLOAT", 0.0, AddSystemVariableOpts{
+		ID:          41,
+		Description: "Servicemeldungen",
+		Internal:    true,
+		MaxValue:    255,
+	})
+}

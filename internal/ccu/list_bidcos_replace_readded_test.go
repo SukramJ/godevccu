@@ -20,21 +20,31 @@ import (
 // ListBidcosInterfaces
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestListBidcosInterfacesReturnsEmptySlice verifies that ListBidcosInterfaces
-// returns a non-nil, empty slice (no physical gateways are modelled).
-func TestListBidcosInterfacesReturnsEmptySlice(t *testing.T) {
+// TestListBidcosInterfacesReportsDefaultGateway verifies that the
+// built-in radio module is reported: a real CCU always lists at least
+// one gateway, and clients read DUTY_CYCLE and CONNECTED off it.
+func TestListBidcosInterfacesReportsDefaultGateway(t *testing.T) {
 	rpc := newRPC(t)
 	result := rpc.ListBidcosInterfaces()
-	if result == nil {
-		t.Fatal("ListBidcosInterfaces returned nil, want non-nil empty slice")
+	if len(result) != 1 {
+		t.Fatalf("ListBidcosInterfaces returned %d entries, want 1", len(result))
 	}
-	if len(result) != 0 {
-		t.Fatalf("ListBidcosInterfaces returned %d entries, want 0", len(result))
+	gw := result[0]
+	for _, key := range []string{"ADDRESS", "DESCRIPTION", "DUTY_CYCLE", "CONNECTED", "DEFAULT", "FIRMWARE_VERSION", "TYPE"} {
+		if _, ok := gw[key]; !ok {
+			t.Errorf("gateway entry missing key %q: %v", key, gw)
+		}
+	}
+	if gw["DEFAULT"] != true {
+		t.Errorf("DEFAULT = %v, want true", gw["DEFAULT"])
+	}
+	if gw["CONNECTED"] != true {
+		t.Errorf("CONNECTED = %v, want true", gw["CONNECTED"])
 	}
 }
 
-// TestListBidcosInterfacesViaXMLRPC exercises the listBidcosInterfaces handler
-// end-to-end through the HTTP server, confirming an empty array and no fault.
+// TestListBidcosInterfacesViaXMLRPC exercises the handler end-to-end
+// through the HTTP server.
 func TestListBidcosInterfacesViaXMLRPC(t *testing.T) {
 	srv := newTestServer(t)
 	url := "http://" + srv.LocalAddr().String() + "/"
@@ -51,8 +61,11 @@ func TestListBidcosInterfacesViaXMLRPC(t *testing.T) {
 	if !ok {
 		t.Fatalf("result type = %T, want xmlrpc.ArrayValue", result)
 	}
-	if len(arr) != 0 {
-		t.Fatalf("result length = %d, want 0", len(arr))
+	if len(arr) != 1 {
+		t.Fatalf("result length = %d, want 1", len(arr))
+	}
+	if _, ok := arr[0].(xmlrpc.StructValue); !ok {
+		t.Fatalf("gateway entry type = %T, want xmlrpc.StructValue", arr[0])
 	}
 }
 

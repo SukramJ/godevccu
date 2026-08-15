@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/SukramJ/godevccu/internal/devicelogic"
@@ -30,6 +32,17 @@ type Server struct {
 	listener net.Listener
 
 	binrpc binrpcState
+	tls    tlsState
+
+	// authenticator guards the XML-RPC surface with HTTP basic auth
+	// when set; see basicauth.go.
+	authenticator Authenticator
+
+	// ready models the CCU boot state. A booting CCU refuses every
+	// remote API port with 503 — not just the web API — so a client
+	// that probes XML-RPC during startup sees the same "still coming
+	// up" answer it would get from real hardware.
+	ready atomic.Bool
 
 	mu          sync.Mutex
 	logics      []devicelogic.Device
@@ -67,8 +80,30 @@ func NewServer(cfg ServerConfig) *Server {
 		enableLogic: cfg.EnableLogic,
 		logicCfg:    cfg.LogicConfig,
 	}
+	s.ready.Store(true)
 	s.registerMethods()
 	return s
+}
+
+// SetReady toggles the boot state. While false every request to the
+// XML-RPC surface is answered with 503; see [Server.ready].
+func (s *Server) SetReady(ready bool) { s.ready.Store(ready) }
+
+// Ready reports the boot state.
+func (s *Server) Ready() bool { return s.ready.Load() }
+
+// readyGate answers 503 while the simulated CCU is still booting and
+// otherwise passes the request through to the XML-RPC handler.
+func (s *Server) readyGate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.ready.Load() {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, "CCU not ready yet")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Addr returns the configured listen address.
@@ -98,7 +133,7 @@ func (s *Server) Start() error {
 	}
 	s.listener = ln
 	srv := &http.Server{
-		Handler:           s.handler,
+		Handler:           s.readyGate(s.basicAuthGate(s.handler)),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 	s.httpSrv = srv
@@ -133,6 +168,11 @@ func (s *Server) Stop() error {
 	s.listener = nil
 	s.mu.Unlock()
 
+	s.rpc.stopTimers()
+	s.rpc.stopDispatchers()
+	if err := s.rpc.saveRegistrations(); err != nil {
+		s.logger.Debug("ccu: save init registrations failed", "err", err)
+	}
 	if err := s.rpc.SaveParamsets(); err != nil {
 		s.logger.Debug("ccu: save paramsets failed", "err", err)
 	}
@@ -334,6 +374,119 @@ func (s *Server) registerMethods() {
 		addr, _ := xmlrpc.AsString(params[0])
 		dataID, _ := xmlrpc.AsString(params[1])
 		return xmlrpc.BoolValue(rpc.SetMetadata(addr, dataID, xmlrpc.ToAny(params[2]))), nil
+	})
+
+	mux.Handle("getAllMetadata", func(_ context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
+		if len(params) < 1 {
+			return nil, fmt.Errorf("getAllMetadata: object_id required")
+		}
+		objectID, _ := xmlrpc.AsString(params[0])
+		return xmlrpc.FromAny(any(rpc.GetAllMetadata(objectID))), nil
+	})
+
+	// determineParameter asks the CCU to re-read a parameter. Clients
+	// call it with either (address, parameter) or the CCU's own
+	// (address, paramsetKey, parameterId).
+	mux.Handle("determineParameter", func(_ context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
+		if len(params) < 2 {
+			return nil, fmt.Errorf("determineParameter: address and parameter required")
+		}
+		address, _ := xmlrpc.AsString(params[0])
+		second, _ := xmlrpc.AsString(params[1])
+		third := ""
+		if len(params) > 2 {
+			third, _ = xmlrpc.AsString(params[2])
+		}
+		ok, err := rpc.DetermineParameter(address, second, third)
+		if err != nil {
+			return nil, faultFromErr(err)
+		}
+		return xmlrpc.BoolValue(ok), nil
+	})
+
+	mux.Handle("getParamsetId", func(_ context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
+		if len(params) < 2 {
+			return nil, fmt.Errorf("getParamsetId: address and paramset_type required")
+		}
+		address, _ := xmlrpc.AsString(params[0])
+		paramsetType, _ := xmlrpc.AsString(params[1])
+		id, err := rpc.GetParamsetID(address, paramsetType)
+		if err != nil {
+			return nil, faultFromErr(err)
+		}
+		return xmlrpc.StringValue(id), nil
+	})
+
+	mux.Handle("activateLinkParamset", func(_ context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
+		if len(params) < 2 {
+			return nil, fmt.Errorf("activateLinkParamset: address and peer_address required")
+		}
+		address, _ := xmlrpc.AsString(params[0])
+		peer, _ := xmlrpc.AsString(params[1])
+		longPress := false
+		if len(params) > 2 {
+			longPress, _ = xmlrpc.AsBool(params[2])
+		}
+		ok, err := rpc.ActivateLinkParamset(address, peer, longPress)
+		if err != nil {
+			return nil, faultFromErr(err)
+		}
+		return xmlrpc.BoolValue(ok), nil
+	})
+
+	mux.Handle("getLinkInfo", func(_ context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
+		if len(params) < 2 {
+			return nil, fmt.Errorf("getLinkInfo: sender and receiver required")
+		}
+		sender, _ := xmlrpc.AsString(params[0])
+		receiver, _ := xmlrpc.AsString(params[1])
+		info, err := rpc.GetLinkInfo(sender, receiver)
+		if err != nil {
+			return nil, faultFromErr(err)
+		}
+		return xmlrpc.FromAny(any(info)), nil
+	})
+
+	mux.Handle("setLinkInfo", func(_ context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
+		if len(params) < 4 {
+			return nil, fmt.Errorf("setLinkInfo: sender, receiver, name and description required")
+		}
+		sender, _ := xmlrpc.AsString(params[0])
+		receiver, _ := xmlrpc.AsString(params[1])
+		name, _ := xmlrpc.AsString(params[2])
+		description, _ := xmlrpc.AsString(params[3])
+		ok, err := rpc.SetLinkInfo(sender, receiver, name, description)
+		if err != nil {
+			return nil, faultFromErr(err)
+		}
+		return xmlrpc.BoolValue(ok), nil
+	})
+
+	mux.Handle("rssiInfo", func(_ context.Context, _ []xmlrpc.Value) (xmlrpc.Value, error) {
+		return xmlrpc.FromAny(any(rpc.RssiInfo())), nil
+	})
+
+	mux.Handle("getSuppressedServiceMessages", func(_ context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
+		if len(params) < 1 {
+			return nil, fmt.Errorf("getSuppressedServiceMessages: channel address required")
+		}
+		address, _ := xmlrpc.AsString(params[0])
+		return xmlrpc.FromAny(any(rpc.SuppressedServiceMessages(address))), nil
+	})
+
+	mux.Handle("suppressServiceMessages", func(_ context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
+		if len(params) < 2 {
+			return nil, fmt.Errorf("suppressServiceMessages: channel address and suppress flag required")
+		}
+		address, _ := xmlrpc.AsString(params[0])
+		parameterID := ""
+		suppressIdx := 1
+		if len(params) > 2 {
+			parameterID, _ = xmlrpc.AsString(params[1])
+			suppressIdx = 2
+		}
+		suppress, _ := xmlrpc.AsBool(params[suppressIdx])
+		return xmlrpc.BoolValue(rpc.SuppressServiceMessage(address, parameterID, suppress)), nil
 	})
 
 	mux.Handle("addLink", func(_ context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
