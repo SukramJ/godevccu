@@ -70,14 +70,22 @@ const (
 
 // Common HomeMatic device-description attribute keys.
 const (
-	AttrAddress    = "ADDRESS"
-	AttrChildren   = "CHILDREN"
-	AttrName       = "NAME"
-	AttrType       = "TYPE"
-	AttrParentType = "PARENT_TYPE"
-	AttrParent     = "PARENT"
-	AttrFlags      = "FLAGS"
-	AttrError      = "ERROR"
+	AttrAddress     = "ADDRESS"
+	AttrChildren    = "CHILDREN"
+	AttrName        = "NAME"
+	AttrType        = "TYPE"
+	AttrParentType  = "PARENT_TYPE"
+	AttrParent      = "PARENT"
+	AttrFlags       = "FLAGS"
+	AttrError       = "ERROR"
+	AttrDescription = "DESCRIPTION"
+	// AttrPong is the parameter a CCU reports on the CENTRAL
+	// pseudo-address to answer a ping; the value is the caller id the
+	// client passed to ping.
+	AttrPong = "PONG"
+	// CentralAddress is the pseudo-address a CCU uses for events that
+	// originate in the central itself rather than in a device.
+	CentralAddress = "CENTRAL"
 )
 
 // Paramset attribute keys.

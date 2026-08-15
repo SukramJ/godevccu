@@ -99,6 +99,42 @@ func TestReadinessGate(t *testing.T) {
 	}
 }
 
+// xmlRPCStatus posts a minimal XML-RPC call and returns the status code.
+func xmlRPCStatus(t *testing.T, v *virtualccu.VirtualCCU) int {
+	t.Helper()
+	addr := v.XMLRPCAddr()
+	if addr == nil {
+		t.Fatal("no XML-RPC address")
+	}
+	body := `<?xml version="1.0"?><methodCall><methodName>ping</methodName><params/></methodCall>`
+	resp, err := http.Post("http://"+addr.String()+"/", "text/xml", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("XML-RPC POST: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode
+}
+
+// TestReadinessGateCoversXMLRPC pins that a booting CCU refuses *every*
+// remote API port, not just the web API: a client probing XML-RPC during
+// startup used to get a normal answer from a CCU that claimed to still
+// be booting.
+func TestReadinessGateCoversXMLRPC(t *testing.T) {
+	t.Parallel()
+	v := startCCUNotReady(t)
+
+	if st := xmlRPCStatus(t, v); st != http.StatusServiceUnavailable {
+		t.Fatalf("XML-RPC while booting = %d, want 503", st)
+	}
+
+	v.SetReady(true)
+
+	if st := xmlRPCStatus(t, v); st != http.StatusOK {
+		t.Fatalf("XML-RPC after SetReady(true) = %d, want 200", st)
+	}
+}
+
 // TestReadyByDefault confirms an ordinary CCU is immediately ready, so
 // existing fixtures are unaffected by the gate.
 func TestReadyByDefault(t *testing.T) {

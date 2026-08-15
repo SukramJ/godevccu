@@ -9,6 +9,174 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added — CCU realism (opt-in)
+
+Every behaviour below sits behind `Config.Realism` or an explicit
+configuration field. The zero value reproduces the established
+pydevccu-shaped behaviour bit for bit, so an existing run is unaffected;
+`godevccu.RealismCCU()` switches the whole set on.
+
+- **Separate interface listeners** (`Config.InterfacePorts`). A CCU is
+  not one process serving every device: rfd serves BidCos-RF on 2001,
+  the HMIPServer serves HomeMatic IP on 2010, hs485d the wired bus on
+  2000 and the group interface answers on 9292. Each configured entry
+  gets its own listener, its own callback registry and only the devices
+  of that protocol family, classified by type prefix. Reach them with
+  `InterfaceAddr(name)` / `InterfaceRPC(name)`;
+  `Interface.listInterfaces` then reports each on its real port, in the
+  CCU's own field set (`name`/`port`/`info`).
+
+- **TLS** (`Config.TLS`). The HTTPS twins of the API ports —
+  2001/42001, 2010/42010, 80/443 — with a self-signed certificate
+  generated at startup when none is supplied. `TLS.Redirect` makes the
+  plaintext web API answer 302 and `CCU.getHttpsRedirectEnabled` report
+  true instead of a hard-coded false.
+
+- **The CCU's error model** (`Realism.ErrorModel`). The 1.1 envelope
+  (`version`, not `jsonrpc`), the error object
+  `{name: "JSONRPCError", code, message}` with the firmware's codes
+  (100/102/103/400/401/402/500), and per-method privilege levels taken
+  from the CCU's own `methods.conf`. Without it a client's
+  authentication-failure path never triggers, because JSON-RPC 2.0
+  codes mean nothing to it.
+
+- **ReGa object ids** (`Realism.RegaIDs`). Devices and channels get the
+  numeric ids a CCU assigns, reported as `Device.listAllDetail.id` and
+  as the `channelIds` of rooms and functions. Without them a client
+  stores a textual address where it expects an ise_id, so every room and
+  function assignment it reads points at nothing.
+
+- **CCU-shaped JSON payloads** (`Realism.JSONSchema`). `SysVar.getAll`
+  reports LOGIC/NUMBER/LIST/ALARM with stringified values and only the
+  type-dependent fields that apply; `Room.listAll` returns plain id
+  strings; `Program.getAll` formats `lastExecuteTime` as a timestamp;
+  `Device.listAllDetail` carries `paramsets`, the firmware fields and
+  the full channel record.
+
+- **Device state machines** (`Realism.Reachability`).
+  `SetDeviceUnreachable` sets UNREACH and latches STICKY_UNREACH until a
+  client acknowledges it, and a MASTER paramset write raises a
+  CONFIG_PENDING pulse with proper edge detection — a second write while
+  one is in flight extends it instead of emitting another rising edge.
+
+- **Service messages derived from the maintenance channel**
+  (`Realism.ServiceMessages`), plus the suppression store behind
+  `getSuppressedServiceMessages` / `suppressServiceMessages` (an empty
+  parameter id silences the whole channel). The XML-RPC
+  `getServiceMessages` default stays hard-coded even here — CLAUDE.md
+  pins that shape.
+
+- **Batched, asynchronous event delivery** (`Realism.BatchEvents`).
+  Events queue into a per-remote dispatcher and travel as one
+  `system.multicall`, so a callback receiver that is slow to answer no
+  longer stalls the `setValue` that produced the event.
+
+- **Callback registrations survive a restart** (`Realism.PersistInit`,
+  requires `Persistence`). A rebooting CCU re-establishes them and
+  resumes pushing; the simulator forgot every client.
+
+- **HTTP basic authentication** (`Realism.BasicAuth`, requires
+  `AuthEnabled`). A CCU protects its remote API ports with basic auth in
+  realm `theRealm` and exempts loopback callers, while the web API stays
+  session-authenticated — the simulator left XML-RPC open regardless of
+  `AuthEnabled`.
+
+- **SSDP/UPnP discovery** (`Realism.Discovery`): M-SEARCH answers and
+  periodic `ssdp:alive` on UDP 1900 from the new `internal/ssdp`
+  package, plus `/upnp/basic_dev.cgi`. This is how a client finds a
+  central without being told its address.
+
+- **Backup lifecycle** (`Realism.BackupAPI`). A started backup now
+  reaches "completed" with a `<host>-<version>-<date>.sbk` name and a
+  downloadable artefact, instead of staying "running" forever behind a
+  permanent 404. Adds `/api/backup/{login,version,run-script,tarfile}.cgi`.
+
+- **`Interface.getSuppressedServiceMessages` and
+  `Interface.suppressServiceMessages`** on both transports, and the
+  built-in system variables a factory CCU ships
+  (`state.SetupBuiltinSysvars`: `${sysVarAlarmZone1}`,
+  `${sysVarPresence}` and the ids 40/41 clients special-case).
+
+### Fixed
+
+- **ReGa scripts are dispatched by their `!# name:` header.** The
+  engine matched script *content* in registration order, so the generic
+  patterns shadowed the specific scripts. Six scripts reached the wrong
+  handler: `set_program_state.fn` and `set_system_variable.fn` were
+  answered with listings and silently changed nothing while reporting
+  success, `accept_device_in_inbox.fn` and `acknowledge_message.fn`
+  returned the inbox/service-message *listing* instead of
+  `{"success":…}`, `create_backup_status.fn` was answered with backend
+  info, and `get_program_descriptions.fn` came back as `Program.getAll`.
+  Content patterns remain as a fallback for clients that send scripts
+  without the header.
+
+- **`fetch_all_device_data.fn` returns a JSON object**, keyed
+  `"<interface>.<channel_address>.<parameter>"` as the script emits it,
+  instead of an array of `{address,param,value}` records. Clients
+  iterate the result as a mapping, so the bulk fetch was unusable.
+
+- **ReGa response keys match the real scripts**: `is_ha_app` (was
+  `is_ha_addon`), `id`/`type` in the inbox listing (were
+  `deviceId`/`deviceType`), snake_case firmware keys
+  (`current_firmware`, `available_firmware`, `update_available`,
+  `check_script_available`), `file` instead of `filepath` in the backup
+  status — which now reports only `status` unless the backup completed —
+  and `script_available`/`message` on the update trigger.
+
+- **Names and descriptions are percent-encoded**, so a space arrives as
+  `%20`. `+` survived into client-side decoded names because clients
+  decode with `unquote()`, not `unquote_plus()`.
+
+- **A callback client is no longer deregistered when it answers with a
+  fault.** Only a transport error means the client is gone; the previous
+  behaviour silently ended event delivery for the rest of the session
+  and was stricter than both the CCU and pydevccu.
+
+- **`setMetadata` stores its value.** Writes were discarded, so a
+  `setMetadata` → `getMetadata` round trip was impossible. Keys that
+  were never written still fall back to the device description.
+
+### Added
+
+- **`ping` fires a `CENTRAL`/`PONG` event** carrying the caller id back
+  to the client that pinged. Without it a client's connection
+  monitoring reports a permanent ping/pong mismatch.
+
+- **XML-RPC methods that real clients call**: `determineParameter`
+  (accepts the two- and three-argument form), `getParamsetId`,
+  `activateLinkParamset`, `getLinkInfo`/`setLinkInfo`, `getAllMetadata`
+  and `rssiInfo`.
+
+- **JSON-RPC methods**: `SysVar.createBool`, `SysVar.createFloat`,
+  `SysVar.createEnum`, `SysVar.setEnum`, `SysVar.get` (CCU type
+  nomenclature LOGIC/NUMBER/LIST with the conditional fields),
+  `CCU.getSerial`, `CCU.getVersion`, `Interface.rssiInfo`,
+  `Interface.listBidcosInterfaces`, `Interface.getLinkInfo`,
+  `Interface.setLinkInfo`, `Interface.determineParameter`,
+  `Interface.getParamsetId`, `system.methodHelp` and `system.describe`.
+  The system-variable lifecycle (create → set → read → delete) is
+  testable against the simulator for the first time.
+
+- **`listBidcosInterfaces` reports the built-in radio module** instead
+  of an empty list. Clients read `DUTY_CYCLE` and `CONNECTED` off that
+  entry; a real CCU always lists at least one gateway.
+
+- **`system.listMethods` (JSON-RPC) reports `name`, `level` and `info`**
+  sorted by name, with the privilege levels and descriptions the CCU
+  publishes in its own `methods.conf`.
+
+### Changed
+
+- **`Config.StartNotReady` also gates the XML-RPC surface** with
+  `503 CCU not ready yet`. A booting CCU refuses every remote API port,
+  not only the web API.
+
+- The ReGa engine is covered by the *unmodified* client scripts in
+  `internal/rega/testdata/scripts/`. The previous tests used
+  hand-written fragments, which is why every one of the routing defects
+  above passed unnoticed.
+
 ## [0.1.10] — 2026-08-05
 
 ### Added

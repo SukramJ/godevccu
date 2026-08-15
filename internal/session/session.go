@@ -7,6 +7,7 @@ package session
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"sync"
 	"time"
@@ -84,6 +85,20 @@ func (m *Manager) Username() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.username
+}
+
+// CheckCredentials reports whether the credentials are valid, without
+// minting a session. HTTP basic authentication needs exactly this: it
+// authenticates every request on its own and never carries a session.
+func (m *Manager) CheckCredentials(username, password string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	// Constant-time comparison: basic auth invites credential probing
+	// in a way the session path does not, since every request carries
+	// the secret afresh.
+	userOK := subtle.ConstantTimeCompare([]byte(username), []byte(m.username)) == 1
+	passOK := subtle.ConstantTimeCompare([]byte(password), []byte(m.password)) == 1
+	return userOK && passOK
 }
 
 // Login validates credentials and returns a fresh session id, or empty

@@ -43,6 +43,10 @@ type Program struct {
 	Description     string
 	Active          bool
 	LastExecuteTime float64
+	// Internal marks a factory program the CCU ships with. Clients hide
+	// those from the user, so reporting every program as non-internal
+	// makes the built-ins show up where they should not.
+	Internal bool
 }
 
 // SystemVariable is a CCU system variable.
@@ -62,6 +66,18 @@ type SystemVariable struct {
 	// when unassigned. Surfaced by the ReGa description script the same
 	// way a real CCU resolves oVar.Channel() to the channel address.
 	ChannelAddress string
+	// Internal marks a variable the CCU maintains itself
+	// (${sysVarPresence} and friends). Clients treat those differently
+	// from user-created ones — some ignore them outright.
+	Internal bool
+	// Visible and Logged mirror the CCU's per-variable flags for WebUI
+	// visibility and value logging. Visible defaults to true.
+	Visible bool
+	Logged  bool
+	// ValueName0 and ValueName1 label the two states of a LOGIC or
+	// ALARM variable; empty falls back to "false"/"true".
+	ValueName0 string
+	ValueName1 string
 }
 
 // Room is a CCU room with the channels assigned to it.

@@ -51,6 +51,39 @@ type VirtualCCU = virtualccu.VirtualCCU
 // Config configures [New].
 type Config = virtualccu.Config
 
+// Realism selects the behaviours where a real CCU differs from
+// pydevccu. Every field is opt-in; the zero value keeps the established
+// pydevccu-shaped behaviour, so an existing run is unaffected.
+//
+// Set [Config.Realism] to [RealismCCU] to switch all of them on.
+type Realism = virtualccu.Realism
+
+// RealismCCU returns a [Realism] with every behaviour enabled.
+func RealismCCU() Realism { return virtualccu.RealismCCU() }
+
+// TLSConfig enables the HTTPS twins of the API ports.
+type TLSConfig = virtualccu.TLSConfig
+
+// Interface names for [Config.InterfacePorts]. Configuring a port for
+// any of them gives that protocol family its own listener, its own
+// callback registry and its own slice of the device catalogue.
+const (
+	InterfaceBidCosRF       = hmconst.InterfaceBidCosRF
+	InterfaceHmIPRF         = hmconst.InterfaceHmIPRF
+	InterfaceBidCosWired    = hmconst.InterfaceBidCosWired
+	InterfaceVirtualDevices = hmconst.InterfaceVirtualDevices
+)
+
+// DefaultInterfacePorts is the port a CCU serves each interface on,
+// ready to be passed as [Config.InterfacePorts].
+func DefaultInterfacePorts() map[string]int {
+	out := make(map[string]int, len(hmconst.DefaultInterfacePorts))
+	for name, port := range hmconst.DefaultInterfacePorts {
+		out[name] = port
+	}
+	return out
+}
+
 // Defaults returns a sensible default Config.
 func Defaults() Config { return virtualccu.Defaults() }
 

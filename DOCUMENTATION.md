@@ -9,19 +9,66 @@ CCU/OpenCCU simulation with the JSON-RPC web API.
 
 ## Contents
 
-1. [Backend modes](#backend-modes)
-2. [VirtualCCU](#virtualccu)
-3. [State manager](#state-manager)
-4. [Session management](#session-management)
-5. [XML-RPC layer](#xml-rpc-layer)
-6. [BIN-RPC layer (CUxD)](#bin-rpc-layer-cuxd)
-7. [JSON-RPC layer](#json-rpc-layer)
-8. [ReGa script engine](#rega-script-engine)
-9. [Device definitions](#device-definitions)
-10. [Device behaviour simulators](#device-behaviour-simulators)
-11. [Configuration](#configuration)
-12. [Persistence](#persistence)
-13. [Example workflows](#example-workflows)
+1. [Realism (opt-in)](#realism-opt-in)
+2. [Backend modes](#backend-modes)
+3. [VirtualCCU](#virtualccu)
+4. [State manager](#state-manager)
+5. [Session management](#session-management)
+6. [XML-RPC layer](#xml-rpc-layer)
+7. [BIN-RPC layer (CUxD)](#bin-rpc-layer-cuxd)
+8. [JSON-RPC layer](#json-rpc-layer)
+9. [ReGa script engine](#rega-script-engine)
+10. [Device definitions](#device-definitions)
+11. [Device behaviour simulators](#device-behaviour-simulators)
+12. [Configuration](#configuration)
+13. [Persistence](#persistence)
+14. [Example workflows](#example-workflows)
+
+---
+
+## Realism (opt-in)
+
+pydevccu parity is a contract, so every behaviour where a real CCU
+differs from pydevccu sits behind `Config.Realism`. The zero value
+reproduces the established behaviour bit for bit; `godevccu.RealismCCU()`
+switches everything on.
+
+| Field | What it changes |
+|-------|-----------------|
+| `JSONSchema` | CCU field names and types: `SysVar.getAll` reports LOGIC/NUMBER/LIST with stringified values and conditional fields, `Room.listAll` returns plain ids, `Program.getAll` formats `lastExecuteTime` as a date, `Device.listAllDetail` carries the full channel record including `paramsets` and the firmware fields. |
+| `RegaIDs` | Numeric ReGa object ids for devices and channels. Without them `Room.getAll.channelIds` is empty, so every room and function assignment a client reads points at nothing. |
+| `ErrorModel` | The CCU's 1.1 envelope (`version`, not `jsonrpc`), its error objects (`{name: "JSONRPCError", code: 400/401/402/…}`) and per-method privilege levels. |
+| `ServiceMessages` | Service messages derived from the maintenance channel, plus the suppression store behind `getSuppressedServiceMessages`/`suppressServiceMessages`. |
+| `Reachability` | `SetDeviceUnreachable` (UNREACH + latching STICKY_UNREACH) and a CONFIG_PENDING pulse after a MASTER write. |
+| `BatchEvents` | Asynchronous delivery from a per-remote dispatcher, bundled into one `system.multicall`. |
+| `PersistInit` | Callback registrations survive a restart (requires `Persistence`). |
+| `Discovery` | SSDP on UDP 1900 plus `/upnp/basic_dev.cgi`. |
+| `BasicAuth` | HTTP basic authentication (realm `theRealm`) on the XML-RPC surface for non-loopback callers. The web API is deliberately exempt — it authenticates by session, as on a CCU. Requires `AuthEnabled`. |
+| `BackupAPI` | `/api/backup/*` and a backup that actually reaches "completed". |
+
+### Separate interface listeners
+
+`Config.InterfacePorts` models the CCU's interface processes. Each entry
+gets its own listener, its own callback registry and only the devices of
+that protocol family, classified by type prefix:
+
+```go
+v, _ := godevccu.New(godevccu.Config{
+    InterfacePorts: godevccu.DefaultInterfacePorts(), // 2001/2010/2000/9292
+    Realism:        godevccu.RealismCCU(),
+})
+```
+
+`VirtualCCU.InterfaceAddr(name)` and `InterfaceRPC(name)` reach an
+individual listener. A nil map keeps the single-endpoint behaviour,
+where `XMLRPCPort` serves every device.
+
+### TLS
+
+`Config.TLS` adds the HTTPS twins a CCU serves alongside its plaintext
+ports (2001/42001, 80/443). Without a supplied certificate a self-signed
+one is generated at startup. `TLS.Redirect` makes the plaintext web API
+answer 302 and `CCU.getHttpsRedirectEnabled` report true.
 
 ---
 
@@ -170,13 +217,29 @@ Implemented XML-RPC methods:
 `listDevices`, `getServiceMessages`, `ping`, `getVersion`,
 `getAllSystemVariables`, `getSystemVariable`, `setSystemVariable`,
 `deleteSystemVariable`, `getValue`, `setValue`, `getDeviceDescription`,
-`getParamsetDescription`, `getParamset`, `putParamset`, `init`,
-`getMetadata`, `setMetadata`, `addLink`, `removeLink`, `getLinkPeers`,
-`getLinks`, `getInstallMode`, `setInstallMode`, `reportValueUsage`,
-`installFirmware`, `updateFirmware`, `clientServerInitialized`.
+`getParamsetDescription`, `getParamset`, `getParamsetId`, `putParamset`,
+`determineParameter`, `init`, `getMetadata`, `setMetadata`,
+`getAllMetadata`, `addLink`, `removeLink`, `getLinkPeers`, `getLinks`,
+`getLinkInfo`, `setLinkInfo`, `activateLinkParamset`,
+`listBidcosInterfaces`, `rssiInfo`, `getInstallMode`, `setInstallMode`,
+`reportValueUsage`, `installFirmware`, `updateFirmware`,
+`clientServerInitialized`.
 
 Plus the system methods `system.listMethods`, `system.methodHelp`,
 `system.multicall`.
+
+`ping` answers `true` and then delivers a `CENTRAL`/`PONG` event
+carrying the caller id back to the registered client, the way a real
+CCU lets a client match its own ping. Callers that pass no caller id
+get the bare `true` and no event.
+
+A callback receiver is only deregistered on a *transport* error. A
+fault is the client answering, so it stays registered and keeps
+receiving events — matching both the CCU and pydevccu.
+
+While `Config.StartNotReady` is in effect the XML-RPC surface answers
+`503 CCU not ready yet`, not just the JSON-RPC web API: a booting CCU
+refuses every remote API port.
 
 ---
 

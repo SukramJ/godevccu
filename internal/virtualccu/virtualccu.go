@@ -20,6 +20,7 @@ import (
 	"github.com/SukramJ/godevccu/internal/jsonrpc"
 	"github.com/SukramJ/godevccu/internal/rega"
 	"github.com/SukramJ/godevccu/internal/session"
+	"github.com/SukramJ/godevccu/internal/ssdp"
 	"github.com/SukramJ/godevccu/internal/state"
 )
 
@@ -69,6 +70,22 @@ type Config struct {
 	// until [VirtualCCU.SetReady](true) is called. Models an add-on co-started
 	// with a (re)booting CCU. Defaults to false (immediately ready).
 	StartNotReady bool
+	// Realism opts into the behaviours where a real CCU differs from
+	// pydevccu. The zero value keeps the established pydevccu-shaped
+	// behaviour; see [Realism] and [RealismCCU].
+	Realism Realism
+	// InterfacePorts models the CCU's separate interface processes:
+	// each key ("BidCos-RF", "HmIP-RF", "BidCos-Wired",
+	// "VirtualDevices") gets its own listener, its own callback
+	// registry and only the devices belonging to that protocol family.
+	// Accepts [EphemeralPort]; resolved ports are written back. A nil
+	// map keeps the single-endpoint behaviour, where XMLRPCPort serves
+	// every device.
+	InterfacePorts map[string]int
+	// TLS enables the HTTPS twins of the API ports (the CCU exposes
+	// 42001/42010/49292/42000 alongside the plaintext ports, and 443
+	// alongside 80). The zero value leaves TLS off.
+	TLS TLSConfig
 	// OnSetValue is forwarded to [ccu.Options.OnSetValue]. The hook
 	// is invoked synchronously after every successful PutParamset
 	// write. Tests use it to model CCU-side echo events for ACTION
@@ -103,6 +120,19 @@ type VirtualCCU struct {
 	xmlrpc  *ccu.Server
 	jsonrpc *jsonrpc.Server
 	rega    *rega.Engine
+
+	// interfaces holds the per-protocol listeners when
+	// [Config.InterfacePorts] is set; empty otherwise.
+	interfaces []*interfaceInstance
+
+	// ssdp announces the simulator on the network when discovery is
+	// enabled.
+	ssdp *ssdp.Responder
+
+	// tlsCert and tlsKey are the resolved certificate material shared
+	// by every TLS listener.
+	tlsCert []byte
+	tlsKey  []byte
 
 	mu      sync.Mutex
 	running bool
@@ -246,6 +276,25 @@ func (v *VirtualCCU) Start() error {
 	if v.cfg.Mode != hmconst.BackendModeHomegear {
 		version = hmconst.CCUFirmwareVersion
 	}
+	if v.cfg.TLS.Enabled {
+		cert, key, err := v.cfg.TLS.resolve()
+		if err != nil {
+			return err
+		}
+		v.tlsCert, v.tlsKey = cert, key
+	}
+
+	// With separate interface listeners configured, each protocol
+	// family gets its own instance and the shared endpoint below only
+	// backs the JSON-RPC handlers.
+	if len(v.cfg.InterfacePorts) > 0 {
+		instances, err := v.startInterfaces(version)
+		if err != nil {
+			return err
+		}
+		v.interfaces = instances
+	}
+
 	rpcFns, err := ccu.NewRPCFunctions(ccu.Options{
 		Devices:     v.cfg.Devices,
 		Persistence: v.cfg.Persistence,
@@ -256,6 +305,7 @@ func (v *VirtualCCU) Start() error {
 	if err != nil {
 		return err
 	}
+	v.applyRealism(rpcFns)
 	v.xmlrpc = ccu.NewServer(ccu.ServerConfig{
 		Address:     net.JoinHostPort(v.cfg.Host, strconv.Itoa(v.cfg.XMLRPCPort)),
 		Logger:      v.logger,
@@ -263,6 +313,10 @@ func (v *VirtualCCU) Start() error {
 		EnableLogic: v.cfg.EnableLogic,
 		LogicConfig: v.cfg.LogicConfig,
 	})
+	// A booting CCU refuses every remote API port, not just the web
+	// API, so the XML-RPC surface shares the readiness gate.
+	v.xmlrpc.SetReady(!v.cfg.StartNotReady)
+	v.applyServerRealism(v.xmlrpc)
 	if err := v.xmlrpc.Start(); err != nil {
 		return fmt.Errorf("virtualccu: xml-rpc start: %w", err)
 	}
@@ -272,6 +326,13 @@ func (v *VirtualCCU) Start() error {
 	// actual XML-RPC endpoint, not 0.
 	if addr, ok := v.xmlrpc.LocalAddr().(*net.TCPAddr); ok && addr != nil {
 		v.cfg.XMLRPCPort = addr.Port
+	}
+	if v.cfg.TLS.Enabled && len(v.interfaces) == 0 {
+		addr := net.JoinHostPort(v.cfg.Host, strconv.Itoa(tlsBindPort(v.cfg.TLS, v.cfg.XMLRPCPort)))
+		if err := v.xmlrpc.StartTLS(addr, v.tlsCert, v.tlsKey); err != nil {
+			_ = v.xmlrpc.Stop()
+			return err
+		}
 	}
 
 	// BIN-RPC is opt-in: only a run that configured a port gets the CUxD
@@ -295,19 +356,55 @@ func (v *VirtualCCU) Start() error {
 
 	if v.cfg.Mode != hmconst.BackendModeHomegear {
 		handlers := jsonrpc.NewHandlers(v.state, v.session, rpcFns, v.rega, v.cfg.XMLRPCPort)
+		handlers.RealisticSchema = v.cfg.Realism.JSONSchema
+		handlers.RegaIDs = v.cfg.Realism.RegaIDs
+		handlers.Interfaces = v.interfaceInventory()
 		v.jsonrpc = jsonrpc.NewServer(jsonrpc.Config{
 			Address:  net.JoinHostPort(v.cfg.Host, strconv.Itoa(v.cfg.JSONRPCPort)),
 			Handlers: handlers,
 			Logger:   v.logger,
 		})
 		v.jsonrpc.SetReady(!v.cfg.StartNotReady)
+		v.jsonrpc.SetCCUErrorModel(v.cfg.Realism.ErrorModel)
+		v.jsonrpc.SetExtraRoutes(jsonrpc.ExtraRoutes{
+			BackupAPI: v.cfg.Realism.BackupAPI,
+			UPnP:      v.cfg.Realism.Discovery,
+		})
+		if v.cfg.Realism.BackupAPI {
+			v.state.SetBackupCompletionDelay(backupCompletionDelay)
+		}
 		if err := v.jsonrpc.Start(); err != nil {
+			v.stopInterfaces()
 			_ = v.xmlrpc.StopBINRPC()
+			_ = v.xmlrpc.StopTLS()
 			_ = v.xmlrpc.Stop()
 			return fmt.Errorf("virtualccu: json-rpc start: %w", err)
 		}
 		if addr, ok := v.jsonrpc.LocalAddr().(*net.TCPAddr); ok && addr != nil {
 			v.cfg.JSONRPCPort = addr.Port
+		}
+		if v.cfg.TLS.Enabled {
+			tlsAddr := net.JoinHostPort(v.cfg.Host, strconv.Itoa(bindablePort(v.cfg.TLS.jsonRPCPort())))
+			if err := v.jsonrpc.StartTLS(tlsAddr, v.tlsCert, v.tlsKey); err != nil {
+				v.stopInterfaces()
+				_ = v.jsonrpc.Stop()
+				_ = v.xmlrpc.StopBINRPC()
+				_ = v.xmlrpc.StopTLS()
+				_ = v.xmlrpc.Stop()
+				return err
+			}
+			if v.cfg.TLS.Redirect {
+				port := v.cfg.TLS.jsonRPCPort()
+				if addr, ok := v.jsonrpc.TLSLocalAddr().(*net.TCPAddr); ok && addr != nil {
+					port = addr.Port
+				}
+				v.jsonrpc.SetHTTPSRedirect(port)
+			}
+		}
+		if v.cfg.Realism.Discovery {
+			if err := v.startDiscovery(); err != nil {
+				v.logger.Warn("virtualccu: discovery disabled", "err", err)
+			}
 		}
 	}
 	v.running = true
@@ -315,16 +412,21 @@ func (v *VirtualCCU) Start() error {
 }
 
 // SetReady toggles the simulated CCU boot state. Pass false to make the
-// JSON-RPC web API answer 503 and /ise/checkrega.cgi report "not ready"
+// remote APIs answer 503 and /ise/checkrega.cgi report "not ready"
 // (modelling a CCU still warming up); pass true once it has "finished
-// booting". A no-op in Homegear mode (no JSON-RPC surface). Safe for
-// concurrent use; may be called while the CCU is running.
+// booting". This covers the XML-RPC surface as well as the JSON-RPC web
+// API — a real CCU refuses both while booting. Safe for concurrent use;
+// may be called while the CCU is running.
 func (v *VirtualCCU) SetReady(ready bool) {
 	v.mu.Lock()
-	srv := v.jsonrpc
+	jsonSrv := v.jsonrpc
+	xmlSrv := v.xmlrpc
 	v.mu.Unlock()
-	if srv != nil {
-		srv.SetReady(ready)
+	if jsonSrv != nil {
+		jsonSrv.SetReady(ready)
+	}
+	if xmlSrv != nil {
+		xmlSrv.SetReady(ready)
 	}
 }
 
@@ -347,13 +449,24 @@ func (v *VirtualCCU) Stop() error {
 	v.running = false
 	xmlSrv := v.xmlrpc
 	jsonSrv := v.jsonrpc
+	discovery := v.ssdp
 	v.xmlrpc = nil
 	v.jsonrpc = nil
+	v.ssdp = nil
+	v.stopInterfaces()
 	v.mu.Unlock()
 
 	var firstErr error
+	if discovery != nil {
+		if err := discovery.Stop(); err != nil {
+			firstErr = err
+		}
+	}
 	if jsonSrv != nil {
-		if err := jsonSrv.Stop(); err != nil {
+		if err := jsonSrv.StopTLS(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		if err := jsonSrv.Stop(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -361,9 +474,72 @@ func (v *VirtualCCU) Stop() error {
 		if err := xmlSrv.StopBINRPC(); err != nil && firstErr == nil {
 			firstErr = err
 		}
+		if err := xmlSrv.StopTLS(); err != nil && firstErr == nil {
+			firstErr = err
+		}
 		if err := xmlSrv.Stop(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
+}
+
+// InterfaceAddr returns the bound address of a per-protocol listener,
+// or nil when that interface was not configured. Only meaningful after
+// Start.
+func (v *VirtualCCU) InterfaceAddr(name string) net.Addr {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	for _, instance := range v.interfaces {
+		if instance.name == name {
+			return instance.server.LocalAddr()
+		}
+	}
+	return nil
+}
+
+// InterfaceRPC returns the RPC facade of a per-protocol listener, or
+// nil. Fixtures use it to drive one interface in isolation.
+func (v *VirtualCCU) InterfaceRPC(name string) *ccu.RPCFunctions {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	for _, instance := range v.interfaces {
+		if instance.name == name {
+			return instance.rpc
+		}
+	}
+	return nil
+}
+
+// TLSAddr returns the bound HTTPS address of the web API, or nil when
+// TLS is off.
+func (v *VirtualCCU) TLSAddr() net.Addr {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.jsonrpc == nil {
+		return nil
+	}
+	return v.jsonrpc.TLSLocalAddr()
+}
+
+// XMLRPCTLSAddr returns the bound HTTPS address of the XML-RPC surface,
+// or nil when TLS is off.
+func (v *VirtualCCU) XMLRPCTLSAddr() net.Addr {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.xmlrpc == nil {
+		return nil
+	}
+	return v.xmlrpc.TLSLocalAddr()
+}
+
+// DiscoveryAddr returns the SSDP responder's bound address, or nil when
+// discovery is off.
+func (v *VirtualCCU) DiscoveryAddr() net.Addr {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.ssdp == nil {
+		return nil
+	}
+	return v.ssdp.LocalAddr()
 }

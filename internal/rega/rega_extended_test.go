@@ -12,6 +12,7 @@ package rega_test
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -107,8 +108,29 @@ func TestGetInbox(t *testing.T) {
 	if !res.Success {
 		t.Fatalf("execute failed: %s", res.Error)
 	}
-	if !strings.Contains(res.Output, "New Switch") {
-		t.Fatalf("output missing inbox device name: %q", res.Output)
+	// get_inbox_devices.fn writes "id"/"type" (not "deviceId"/
+	// "deviceType") and URI-encodes the name.
+	var entries []map[string]any
+	decodeJSON(t, res.Output, &entries)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1: %q", len(entries), res.Output)
+	}
+	got := entries[0]
+	name, err := url.QueryUnescape(got["name"].(string))
+	if err != nil {
+		t.Fatalf("name not URL-decodable: %v", err)
+	}
+	if name != "New Switch" {
+		t.Errorf("name = %q, want New Switch", name)
+	}
+	if got["type"] != "HmIP-PS" {
+		t.Errorf("type = %v, want HmIP-PS", got["type"])
+	}
+	if got["id"] == nil || got["id"] == "" {
+		t.Errorf("id missing: %v", got)
+	}
+	if _, exists := got["deviceType"]; exists {
+		t.Error("deviceType must not be emitted — the real script writes type")
 	}
 }
 
@@ -157,12 +179,23 @@ func TestSetProgramStateDeactivate(t *testing.T) {
 	}
 }
 
-// handleSetProgramState must return empty output (not an error).
-func TestSetProgramStateReturnsEmpty(t *testing.T) {
+// set_program_state.fn ends in Write(program.Active()), so the new
+// state is echoed back rather than producing empty output.
+func TestSetProgramStateWritesNewState(t *testing.T) {
 	st, e := newEngine(t)
 	p := st.AddProgram("Test", "", true, 0)
 
 	res := e.Execute(`dom.GetObject(` + itoa(p.ID) + `).Active(false)`)
+	if res.Output != "false" {
+		t.Errorf("output = %q, want false", res.Output)
+	}
+}
+
+// An unknown program fails the script's "if (program)" guard, so
+// nothing is written.
+func TestSetProgramStateUnknownProgramWritesNothing(t *testing.T) {
+	_, e := newEngine(t)
+	res := e.Execute(`dom.GetObject(999999).Active(false)`)
 	if res.Output != "" {
 		t.Errorf("output = %q, want empty string", res.Output)
 	}
@@ -203,10 +236,12 @@ func TestFetchDeviceDataByParamHeader(t *testing.T) {
 func TestFetchDeviceDataEmpty(t *testing.T) {
 	_, e := newEngine(t)
 	res := e.Execute(`foreach (dp, dom.GetObject(ID_DATAPOINTS)`)
-	var arr []any
-	decodeJSON(t, res.Output, &arr)
-	if len(arr) != 0 {
-		t.Errorf("expected empty list for empty device cache, got %d items", len(arr))
+	// The script frames its output with Write('{') … Write('}'), so an
+	// empty cache is an empty object — never an empty array.
+	var obj map[string]any
+	decodeJSON(t, res.Output, &obj)
+	if len(obj) != 0 {
+		t.Errorf("expected empty object for empty device cache, got %d entries", len(obj))
 	}
 }
 
@@ -269,13 +304,17 @@ func TestUpdateInfo(t *testing.T) {
 	if !res.Success {
 		t.Fatalf("execute failed: %s", res.Error)
 	}
+	// get_system_update_info.fn writes snake_case keys.
 	var m map[string]any
 	decodeJSON(t, res.Output, &m)
-	if m["updateAvailable"] != true {
-		t.Errorf("updateAvailable = %v, want true", m["updateAvailable"])
+	if m["update_available"] != true {
+		t.Errorf("update_available = %v, want true", m["update_available"])
 	}
-	if m["availableFirmware"] != "3.87.1" {
-		t.Errorf("availableFirmware = %v, want 3.87.1", m["availableFirmware"])
+	if m["available_firmware"] != "3.87.1" {
+		t.Errorf("available_firmware = %v, want 3.87.1", m["available_firmware"])
+	}
+	if m["current_firmware"] != "3.87.0" {
+		t.Errorf("current_firmware = %v, want 3.87.0", m["current_firmware"])
 	}
 }
 

@@ -72,6 +72,20 @@ type Server struct {
 	// [Server.SetReady]. Defaults to true so existing fixtures see an
 	// immediately-serving CCU.
 	ready atomic.Bool
+
+	tls tlsState
+
+	// extraRoutes selects the additional CGI endpoints; see
+	// extra_routes.go.
+	extraRoutes ExtraRoutes
+
+	// ccuErrorModel switches to the CCU's 1.1 envelope, its numeric
+	// error codes and its privilege levels; see ccuerrors.go.
+	ccuErrorModel bool
+
+	// httpsRedirectPort is non-zero when the plaintext listener should
+	// answer 302 towards its HTTPS twin; see [Server.SetHTTPSRedirect].
+	httpsRedirectPort atomic.Int64
 }
 
 // Config configures [NewServer].
@@ -123,12 +137,7 @@ func (s *Server) Start() error {
 	if s.running {
 		return errors.New("jsonrpc: server already running")
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/homematic.cgi", s.handleJSONRPC)
-	mux.HandleFunc("/config/cp_security.cgi", s.handleBackupDownload)
-	mux.HandleFunc("/config/cp_maintenance.cgi", s.handleMaintenance)
-	mux.HandleFunc("/VERSION", s.handleVersion)
-	mux.HandleFunc("/ise/checkrega.cgi", s.handleCheckRega)
+	mux := s.routes()
 
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
@@ -136,7 +145,7 @@ func (s *Server) Start() error {
 	}
 	s.listener = ln
 	srv := &http.Server{
-		Handler:           mux,
+		Handler:           s.redirectGate(mux),
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 	s.httpSrv = srv
@@ -256,13 +265,16 @@ func (s *Server) processOne(ctx context.Context, raw []byte) map[string]any {
 		SessionID json.RawMessage `json:"_session_id_,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &req); err != nil {
-		return errorResponse(nil, ErrParse(err.Error()))
+		return s.failure(nil, ErrParse(err.Error()))
 	}
-	if req.JSONRPC != "1.1" && req.JSONRPC != "2.0" {
-		return errorResponse(req.ID, ErrInvalid("Invalid JSON-RPC version"))
+	// A CCU never inspects the version member, so with its error model
+	// active an absent version is accepted too.
+	versionOmitted := s.ccuErrorModel && req.JSONRPC == ""
+	if req.JSONRPC != "1.1" && req.JSONRPC != "2.0" && !versionOmitted {
+		return s.failure(req.ID, ErrInvalid("Invalid JSON-RPC version"))
 	}
 	if req.Method == "" {
-		return errorResponse(req.ID, ErrInvalid("Method must be a non-empty string"))
+		return s.failure(req.ID, ErrInvalid("Method must be a non-empty string"))
 	}
 
 	var params map[string]any
@@ -280,17 +292,14 @@ func (s *Server) processOne(ctx context.Context, raw []byte) map[string]any {
 		params = map[string]any{}
 	}
 
-	// Authentication.
-	if s.requiresAuth(req.Method) {
-		sid := extractSessionID(raw, params)
-		if !s.session.Validate(sid) {
-			return errorResponse(req.ID, ErrSession("Session expired or invalid"))
-		}
+	// Authentication and privilege level.
+	if err := s.authorize(req.Method, raw, params); err != nil {
+		return s.failure(req.ID, err)
 	}
 
 	handler, ok := s.methods[req.Method]
 	if !ok {
-		return errorResponse(req.ID, ErrMethod(req.Method))
+		return s.failure(req.ID, ErrMethod(req.Method))
 	}
 
 	result, err := handler(ctx, params)
@@ -301,20 +310,48 @@ func (s *Server) processOne(ctx context.Context, raw []byte) map[string]any {
 	if err != nil {
 		var jrErr *Error
 		if errors.As(err, &jrErr) {
-			return errorResponse(req.ID, jrErr)
+			return s.failure(req.ID, jrErr)
 		}
-		return errorResponse(req.ID, ErrInternal(err.Error()))
+		return s.failure(req.ID, ErrInternal(err.Error()))
 	}
-	return successResponse(req.ID, result)
+	return s.success(req.ID, result)
 }
 
-func (s *Server) requiresAuth(method string) bool {
+// authorize enforces authentication. With the CCU error model active it
+// compares the method's declared privilege level against the session's:
+// a valid session is an administrator (the simulator has a single
+// account), no session is NONE. Otherwise the historical public-method
+// set decides.
+func (s *Server) authorize(method string, raw []byte, params map[string]any) *Error {
 	if !s.session.AuthEnabled() {
-		return false
+		return nil
 	}
-	_, ok := PublicMethods[method]
-	return !ok
+	valid := s.session.Validate(extractSessionID(raw, params))
+
+	if !s.ccuErrorModel {
+		if _, public := PublicMethods[method]; public || valid {
+			return nil
+		}
+		return ErrSession("Session expired or invalid")
+	}
+
+	required := metaFor(method).level
+	if required == "NONE" {
+		return nil
+	}
+	have := levelNone
+	if valid {
+		have = levelAdmin
+	}
+	if levelValue(required) > have {
+		return ErrAccessDenied(required, have)
+	}
+	return nil
 }
+
+// SetCCUErrorModel switches the envelope and error objects to the CCU's
+// own form and enables privilege-level enforcement. Call before Start.
+func (s *Server) SetCCUErrorModel(enabled bool) { s.ccuErrorModel = enabled }
 
 // extractSessionID examines the request body and the (already parsed)
 // params for a session id. Mirrors pydevccu's _extract_session_id.
@@ -462,4 +499,45 @@ func errorResponse(id any, err *Error) map[string]any {
 		"error":   err.MarshalDict(),
 		"id":      id,
 	}
+}
+
+// ccuSuccessResponse and ccuErrorResponse render the envelope a real
+// CCU sends: the version lives in "version", not "jsonrpc".
+func ccuSuccessResponse(id any, result any) map[string]any {
+	out := map[string]any{
+		"version": JSONRPCVersion,
+		"result":  result,
+		"error":   nil,
+	}
+	if id != nil {
+		out["id"] = id
+	}
+	return out
+}
+
+func ccuErrorResponse(id any, err *Error) map[string]any {
+	out := map[string]any{
+		"version": JSONRPCVersion,
+		"result":  nil,
+		"error":   err.marshalCCU(),
+	}
+	if id != nil {
+		out["id"] = id
+	}
+	return out
+}
+
+// success and failure pick the envelope for the configured model.
+func (s *Server) success(id any, result any) map[string]any {
+	if s.ccuErrorModel {
+		return ccuSuccessResponse(id, result)
+	}
+	return successResponse(id, result)
+}
+
+func (s *Server) failure(id any, err *Error) map[string]any {
+	if s.ccuErrorModel {
+		return ccuErrorResponse(id, err)
+	}
+	return errorResponse(id, err)
 }

@@ -5,6 +5,7 @@ package godevccu_test
 
 import (
 	"net"
+	"reflect"
 	"testing"
 	"time"
 
@@ -238,5 +239,55 @@ func TestBackendModeConstants(t *testing.T) {
 	}
 	if godevccu.BackendModeOpenCCU == 0 {
 		t.Error("BackendModeOpenCCU must be non-zero")
+	}
+}
+
+// TestRealismDefaultsAreOff pins the contract: a zero-valued Config
+// enables none of the CCU-realism behaviours, so an existing consumer
+// sees exactly what it saw before.
+func TestRealismDefaultsAreOff(t *testing.T) {
+	var cfg godevccu.Config
+	if cfg.Realism.Any() {
+		t.Fatalf("zero Config already opts into realism: %+v", cfg.Realism)
+	}
+	if cfg.InterfacePorts != nil {
+		t.Error("zero Config must not configure interface listeners")
+	}
+	if cfg.TLS.Enabled {
+		t.Error("zero Config must not enable TLS")
+	}
+}
+
+// TestRealismCCUEnablesEverything guards against a field being added to
+// Realism without being wired into the preset.
+func TestRealismCCUEnablesEverything(t *testing.T) {
+	full := godevccu.RealismCCU()
+	value := reflect.ValueOf(full)
+	for i := range value.NumField() {
+		field := value.Field(i)
+		if field.Kind() == reflect.Bool && !field.Bool() {
+			t.Errorf("RealismCCU leaves %s off", value.Type().Field(i).Name)
+		}
+	}
+}
+
+// TestDefaultInterfacePortsMatchTheCCU pins the canonical ports and that
+// callers get their own copy to mutate.
+func TestDefaultInterfacePortsMatchTheCCU(t *testing.T) {
+	ports := godevccu.DefaultInterfacePorts()
+	expected := map[string]int{
+		godevccu.InterfaceBidCosRF:       2001,
+		godevccu.InterfaceHmIPRF:         2010,
+		godevccu.InterfaceBidCosWired:    2000,
+		godevccu.InterfaceVirtualDevices: 9292,
+	}
+	for name, want := range expected {
+		if got := ports[name]; got != want {
+			t.Errorf("%s = %d, want %d", name, got, want)
+		}
+	}
+	ports[godevccu.InterfaceBidCosRF] = 1
+	if godevccu.DefaultInterfacePorts()[godevccu.InterfaceBidCosRF] != 2001 {
+		t.Error("callers share the defaults map — mutating one run affects the next")
 	}
 }

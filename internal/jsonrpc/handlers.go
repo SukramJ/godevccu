@@ -5,8 +5,12 @@ package jsonrpc
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/SukramJ/godevccu/internal/ccu"
 	"github.com/SukramJ/godevccu/internal/hmconst"
@@ -28,7 +32,36 @@ type Handlers struct {
 
 	// XMLRPCPort is the port exposed via Interface.listInterfaces.
 	XMLRPCPort int
+
+	// Interfaces overrides the hard-coded listInterfaces answer with the
+	// real interface inventory. Empty keeps the two-entry default.
+	Interfaces []InterfaceInfo
+
+	// RealisticSchema reports the CCU's own field names and types
+	// instead of the pydevccu-shaped ones; see
+	// virtualccu.Realism.JSONSchema.
+	RealisticSchema bool
+
+	// RegaIDs reports numeric ReGa object ids for devices and channels;
+	// see virtualccu.Realism.RegaIDs.
+	RegaIDs bool
+
+	// httpsRedirect backs CCU.getHttpsRedirectEnabled.
+	httpsRedirect atomic.Bool
 }
+
+// InterfaceInfo is one entry of Interface.listInterfaces: the name a
+// client uses to address the interface, the port it listens on and a
+// human-readable description.
+type InterfaceInfo struct {
+	Name string
+	Port int
+	Info string
+}
+
+// SetHTTPSRedirect records whether the CCU enforces HTTPS, which
+// CCU.getHttpsRedirectEnabled reports.
+func (h *Handlers) SetHTTPSRedirect(enabled bool) { h.httpsRedirect.Store(enabled) }
 
 // NewHandlers builds a Handlers instance.
 func NewHandlers(stateMgr *state.Manager, sess *session.Manager, rpc *ccu.RPCFunctions, regaEng *rega.Engine, xmlRPCPort int) *Handlers {
@@ -51,7 +84,11 @@ func (h *Handlers) Methods() map[string]HandlerFunc {
 		// CCU
 		"CCU.getAuthEnabled":          h.getAuthEnabled,
 		"CCU.getHttpsRedirectEnabled": h.getHTTPSRedirectEnabled,
+		"CCU.getSerial":               h.getSerial,
+		"CCU.getVersion":              h.getCCUVersion,
 		"system.listMethods":          h.listMethods,
+		"system.methodHelp":           h.methodHelp,
+		"system.describe":             h.describe,
 		// Interface
 		"Interface.listInterfaces":         h.listInterfaces,
 		"Interface.listDevices":            h.listDevices,
@@ -68,6 +105,15 @@ func (h *Handlers) Methods() map[string]HandlerFunc {
 		"Interface.getMasterValue":         h.getMasterValue,
 		"Interface.ping":                   h.ping,
 		"Interface.init":                   h.interfaceInit,
+		"Interface.rssiInfo":               h.rssiInfo,
+		"Interface.listBidcosInterfaces":   h.listBidcosInterfaces,
+		"Interface.getLinkInfo":            h.getLinkInfo,
+		"Interface.setLinkInfo":            h.setLinkInfo,
+		"Interface.determineParameter":     h.determineParameter,
+		"Interface.getParamsetId":          h.getParamsetID,
+
+		"Interface.getSuppressedServiceMessages": h.getSuppressedServiceMessages,
+		"Interface.suppressServiceMessages":      h.suppressServiceMessages,
 		// Device / Channel
 		"Device.listAllDetail":  h.deviceListAllDetail,
 		"Device.get":            h.deviceGet,
@@ -80,14 +126,19 @@ func (h *Handlers) Methods() map[string]HandlerFunc {
 		"Program.setActive": h.programSetActive,
 		// SysVar
 		"SysVar.getAll":             h.sysvarGetAll,
+		"SysVar.get":                h.sysvarGet,
 		"SysVar.getValueByName":     h.sysvarGetValueByName,
 		"SysVar.setBool":            h.sysvarSet,
 		"SysVar.setFloat":           h.sysvarSet,
 		"SysVar.setString":          h.sysvarSet,
+		"SysVar.setEnum":            h.sysvarSetEnum,
+		"SysVar.createBool":         h.sysvarCreate("BOOL"),
+		"SysVar.createFloat":        h.sysvarCreate("FLOAT"),
+		"SysVar.createEnum":         h.sysvarCreate("ENUM"),
 		"SysVar.deleteSysVarByName": h.sysvarDelete,
 		// Rooms / Functions
 		"Room.getAll":       h.roomGetAll,
-		"Room.listAll":      h.roomGetAll,
+		"Room.listAll":      h.roomListAll,
 		"Subsection.getAll": h.subsectionGetAll,
 		// ReGa
 		"ReGa.runScript": h.regaRunScript,
@@ -100,6 +151,9 @@ var PublicMethods = map[string]struct{}{
 	"CCU.getAuthEnabled":          {},
 	"CCU.getHttpsRedirectEnabled": {},
 	"system.listMethods":          {},
+	// LEVEL NONE on a real CCU, like listMethods.
+	"system.methodHelp": {},
+	"system.describe":   {},
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -136,23 +190,70 @@ func (h *Handlers) getAuthEnabled(_ context.Context, _ map[string]any) (any, err
 }
 
 func (h *Handlers) getHTTPSRedirectEnabled(_ context.Context, _ map[string]any) (any, error) {
-	return false, nil
+	return h.httpsRedirect.Load(), nil
 }
 
+// listMethods answers system.listMethods with the name, privilege level
+// and description of every method, sorted by name — the shape a real
+// CCU produces from its methods.conf. Reporting the bare name hid the
+// level information clients use to reason about permissions.
 func (h *Handlers) listMethods(_ context.Context, _ map[string]any) (any, error) {
 	methods := h.Methods()
-	out := make([]map[string]any, 0, len(methods))
+	names := make([]string, 0, len(methods))
 	for name := range methods {
-		out = append(out, map[string]any{"name": name})
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		m := metaFor(name)
+		out = append(out, map[string]any{
+			"name":  name,
+			"level": m.level,
+			"info":  m.info,
+		})
 	}
 	return out, nil
+}
+
+// methodHelp answers system.methodHelp with a method's description.
+func (h *Handlers) methodHelp(_ context.Context, params map[string]any) (any, error) {
+	name := stringParam(params, "name")
+	if name == "" {
+		return nil, ErrParams("Missing name parameter")
+	}
+	if _, ok := h.Methods()[name]; !ok {
+		return nil, ErrObject("Method", name)
+	}
+	return metaFor(name).info, nil
+}
+
+// describe answers system.describe with the full method catalogue —
+// the same records as listMethods, which is what the CCU serves.
+func (h *Handlers) describe(ctx context.Context, params map[string]any) (any, error) {
+	return h.listMethods(ctx, params)
 }
 
 // ─────────────────────────────────────────────────────────────────
 // Interface
 // ─────────────────────────────────────────────────────────────────
 
+// listInterfaces reports the interface inventory. With separate
+// interface listeners configured it reports them verbatim in the CCU's
+// own field set (name/port/info); otherwise it keeps the established
+// two-entry answer.
 func (h *Handlers) listInterfaces(_ context.Context, _ map[string]any) (any, error) {
+	if len(h.Interfaces) > 0 {
+		out := make([]map[string]any, 0, len(h.Interfaces))
+		for _, iface := range h.Interfaces {
+			out = append(out, map[string]any{
+				"name": iface.Name,
+				"port": iface.Port,
+				"info": iface.Info,
+			})
+		}
+		return out, nil
+	}
 	return []map[string]any{
 		{
 			"name":      "HmIP-RF",
@@ -326,29 +427,168 @@ func (h *Handlers) deviceListAllDetail(_ context.Context, _ map[string]any) (any
 		address, _ := d["ADDRESS"].(string)
 		if strings.Contains(address, ":") {
 			parentAddr := address[:strings.IndexByte(address, ':')]
-			channelsByParent[parentAddr] = append(channelsByParent[parentAddr], map[string]any{
-				"id":        address,
-				"address":   address,
-				"type":      d["TYPE"],
-				"name":      h.deviceName(address, d),
-				"interface": stringOrDefault(d["INTERFACE"], "HmIP-RF"),
-			})
+			channelsByParent[parentAddr] = append(channelsByParent[parentAddr], h.channelRecord(address, d))
 		} else {
 			parents[address] = d
 		}
 	}
 	out := make([]map[string]any, 0, len(parents))
 	for address, d := range parents {
-		out = append(out, map[string]any{
-			"id":        address,
+		record := map[string]any{
+			"id":        h.objectID(address),
 			"address":   address,
 			"type":      d["TYPE"],
 			"name":      h.deviceName(address, d),
-			"interface": stringOrDefault(d["INTERFACE"], "HmIP-RF"),
+			"interface": h.interfaceOf(d),
 			"channels":  channelsByParent[address],
-		})
+		}
+		if h.RealisticSchema {
+			// A client reads the firmware fields off this record, not
+			// off the XML-RPC device description, so without them no
+			// firmware information reaches it at all.
+			record["paramsets"] = paramsetNames(d)
+			record["firmware"] = stringOrDefault(d["FIRMWARE"], "")
+			record["availableFirmware"] = stringOrDefault(d["AVAILABLE_FIRMWARE"], "")
+			record["updatable"] = asBool(d["UPDATABLE"])
+			record["firmwareUpdateState"] = stringOrDefault(d["FIRMWARE_UPDATE_STATE"], "")
+			record["readyConfig"] = true
+		}
+		out = append(out, record)
 	}
 	return out, nil
+}
+
+// channelRecord builds one entry of a device's "channels" array.
+func (h *Handlers) channelRecord(address string, d map[string]any) map[string]any {
+	record := map[string]any{
+		"id":        h.objectID(address),
+		"address":   address,
+		"type":      d["TYPE"],
+		"name":      h.deviceName(address, d),
+		"interface": h.interfaceOf(d),
+	}
+	if h.RealisticSchema {
+		record["deviceId"] = h.objectID(parentAddress(address))
+		record["index"] = channelIndex(address)
+		record["channelType"] = d["TYPE"]
+		record["paramsets"] = paramsetNames(d)
+		record["mode"] = "MODE_UNKNOWN"
+		record["category"] = categoryFor(d["DIRECTION"])
+		record["partnerId"] = ""
+		record["isReady"] = true
+		record["visible"] = true
+		record["operateGroupOnly"] = "false"
+	}
+	return record
+}
+
+// objectID reports a channel's or device's id. With ReGa ids enabled it
+// is the numeric object id a CCU assigns — a client stores it as the
+// ise_id and cross-references it against the channel ids of rooms and
+// functions, which never match a textual address.
+func (h *Handlers) objectID(address string) any {
+	if !h.RegaIDs || h.State == nil {
+		return address
+	}
+	return h.State.RegisterAddress(address)
+}
+
+// interfaceOf derives the interface name from the device description,
+// falling back to the type prefix. Reporting a name a client does not
+// recognise makes it silently substitute its own default.
+func (h *Handlers) interfaceOf(d map[string]any) string {
+	if iface, _ := d["INTERFACE"].(string); iface != "" && !strings.EqualFold(iface, "godevccu") {
+		return iface
+	}
+	typeStr, _ := d["TYPE"].(string)
+	if parent, ok := d["PARENT_TYPE"].(string); ok && parent != "" {
+		typeStr = parent
+	}
+	return hmconst.InterfaceForType(typeStr)
+}
+
+// parentAddress strips the channel suffix from an address.
+func parentAddress(address string) string {
+	if i := strings.IndexByte(address, ':'); i >= 0 {
+		return address[:i]
+	}
+	return address
+}
+
+// channelIndex is the number behind the colon, or 0.
+func channelIndex(address string) int {
+	i := strings.IndexByte(address, ':')
+	if i < 0 {
+		return 0
+	}
+	n, err := strconv.Atoi(address[i+1:])
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// paramsetNames reports the paramsets a device or channel exposes. The
+// description carries them as an array; a client reads the field
+// unconditionally.
+func paramsetNames(d map[string]any) []string {
+	raw, ok := d["PARAMSETS"].([]any)
+	if !ok {
+		return []string{}
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// categoryFor maps a channel's DIRECTION onto the CCU's category
+// vocabulary: 1 = sender, 2 = receiver.
+func categoryFor(direction any) string {
+	switch asInt(direction) {
+	case 1:
+		return "CATEGORY_SENDER"
+	case 2:
+		return "CATEGORY_RECEIVER"
+	default:
+		return "CATEGORY_NONE"
+	}
+}
+
+// asBool coerces the loosely typed description values to a bool —
+// UPDATABLE arrives as an integer on the older device catalogue.
+func asBool(v any) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case float64:
+		return x != 0
+	case int:
+		return x != 0
+	case string:
+		return x == "1" || strings.EqualFold(x, "true")
+	default:
+		return false
+	}
+}
+
+// asInt coerces a description value to an int.
+func asInt(v any) int {
+	switch x := v.(type) {
+	case float64:
+		return int(x)
+	case int:
+		return x
+	case string:
+		n, err := strconv.Atoi(x)
+		if err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 func (h *Handlers) deviceGet(_ context.Context, params map[string]any) (any, error) {
@@ -399,16 +639,35 @@ func (h *Handlers) programGetAll(_ context.Context, _ map[string]any) (any, erro
 	progs := h.State.Programs()
 	out := make([]map[string]any, 0, len(progs))
 	for _, p := range progs {
-		out = append(out, map[string]any{
+		record := map[string]any{
 			"id":              strconv.Itoa(p.ID),
 			"name":            p.Name,
 			"description":     p.Description,
 			"isActive":        p.Active,
-			"isInternal":      false,
+			"isInternal":      p.Internal,
 			"lastExecuteTime": p.LastExecuteTime,
-		})
+		}
+		if h.RealisticSchema {
+			// A CCU reports the last execution as a formatted local
+			// timestamp, not as a Unix float.
+			record["lastExecuteTime"] = formatCCUTime(p.LastExecuteTime)
+		}
+		out = append(out, record)
 	}
 	return out, nil
+}
+
+// ccuTimeLayout is how a CCU renders timestamps in its JSON API.
+const ccuTimeLayout = "2006-01-02 15:04:05"
+
+// formatCCUTime renders a Unix timestamp the CCU way. A zero timestamp
+// means "never executed" and stays empty.
+func formatCCUTime(ts float64) string {
+	if ts <= 0 {
+		return ""
+	}
+	sec := int64(ts)
+	return time.Unix(sec, 0).Format(ccuTimeLayout)
 }
 
 func (h *Handlers) programExecute(_ context.Context, params map[string]any) (any, error) {
@@ -441,6 +700,10 @@ func (h *Handlers) sysvarGetAll(_ context.Context, _ map[string]any) (any, error
 	svs := h.State.SystemVariables()
 	out := make([]map[string]any, 0, len(svs))
 	for _, sv := range svs {
+		if h.RealisticSchema {
+			out = append(out, ccuSysvarRecord(sv))
+			continue
+		}
 		out = append(out, map[string]any{
 			"id":          strconv.Itoa(sv.ID),
 			"name":        sv.Name,
@@ -452,10 +715,69 @@ func (h *Handlers) sysvarGetAll(_ context.Context, _ map[string]any) (any, error
 			"minValue":    sv.MinValue,
 			"maxValue":    sv.MaxValue,
 			"timestamp":   sv.Timestamp,
-			"isInternal":  false,
+			"isInternal":  sv.Internal,
 		})
 	}
 	return out, nil
+}
+
+// ccuSysvarRecord renders a system variable the way a CCU does: the
+// type names LOGIC/NUMBER/LIST/ALARM/STRING, every value as a string,
+// and the type-dependent fields present only where they apply. There is
+// no description and no timestamp — a CCU serves the description
+// through a separate ReGa script.
+func ccuSysvarRecord(sv *state.SystemVariable) map[string]any {
+	varType := ccuVarType(sv.VarType)
+	record := map[string]any{
+		"id":         strconv.Itoa(sv.ID),
+		"name":       sv.Name,
+		"type":       varType,
+		"unit":       sv.Unit,
+		"value":      ccuValueString(sv.Value),
+		"channelId":  sv.ChannelAddress,
+		"isLogged":   sv.Logged,
+		"isVisible":  sv.Visible,
+		"isInternal": sv.Internal,
+	}
+	switch varType {
+	case "LOGIC", "ALARM":
+		record["valueName0"] = valueNameOr(sv.ValueName0, "false")
+		record["valueName1"] = valueNameOr(sv.ValueName1, "true")
+	case "LIST":
+		record["valueList"] = sv.ValueList
+	case "NUMBER":
+		record["minValue"] = ccuValueString(sv.MinValue)
+		record["maxValue"] = ccuValueString(sv.MaxValue)
+	}
+	return record
+}
+
+// valueNameOr falls back to the CCU's default names for a boolean.
+func valueNameOr(name, fallback string) string {
+	if name == "" {
+		return fallback
+	}
+	return name
+}
+
+// ccuValueString stringifies a value the way the CCU's json_toString
+// does — every value in the sysvar payload is a JSON string, whatever
+// its underlying type.
+func ccuValueString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case bool:
+		return strconv.FormatBool(x)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(x)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", x)
+	}
 }
 
 func (h *Handlers) sysvarGetValueByName(_ context.Context, params map[string]any) (any, error) {
@@ -487,6 +809,266 @@ func (h *Handlers) sysvarDelete(_ context.Context, params map[string]any) (any, 
 	return map[string]any{"success": h.State.DeleteSystemVariable(name)}, nil
 }
 
+// getSerial answers CCU.getSerial. Clients used to reach the serial
+// only through a ReGa script detour.
+func (h *Handlers) getSerial(_ context.Context, _ map[string]any) (any, error) {
+	return h.State.Serial(), nil
+}
+
+// getCCUVersion answers CCU.getVersion with the firmware version.
+func (h *Handlers) getCCUVersion(_ context.Context, _ map[string]any) (any, error) {
+	if h.RPC == nil {
+		return hmconst.CCUFirmwareVersion, nil
+	}
+	return h.RPC.GetVersion(), nil
+}
+
+// rssiInfo answers Interface.rssiInfo with the nested
+// device → partner → [rssi, rssi] structure of a real CCU.
+func (h *Handlers) rssiInfo(_ context.Context, _ map[string]any) (any, error) {
+	if h.RPC == nil {
+		return map[string]any{}, nil
+	}
+	return h.RPC.RssiInfo(), nil
+}
+
+// listBidcosInterfaces answers Interface.listBidcosInterfaces in the
+// CCU's JSON field spelling, mapped from the XML-RPC gateway record.
+func (h *Handlers) listBidcosInterfaces(_ context.Context, _ map[string]any) (any, error) {
+	if h.RPC == nil {
+		return []any{}, nil
+	}
+	gateways := h.RPC.ListBidcosInterfaces()
+	out := make([]map[string]any, 0, len(gateways))
+	for _, gw := range gateways {
+		out = append(out, map[string]any{
+			"address":     gw[hmconst.AttrAddress],
+			"description": gw[hmconst.AttrDescription],
+			"dutyCycle":   gw["DUTY_CYCLE"],
+			"isConnected": gw["CONNECTED"],
+			"isDefault":   gw["DEFAULT"],
+			"fwVersion":   gw["FIRMWARE_VERSION"],
+			"type":        gw[hmconst.AttrType],
+		})
+	}
+	return out, nil
+}
+
+// getLinkInfo / setLinkInfo carry the name and description of a direct
+// link, which the simulator previously dropped entirely.
+func (h *Handlers) getLinkInfo(_ context.Context, params map[string]any) (any, error) {
+	sender := stringParam(params, "senderAddress")
+	receiver := stringParam(params, "receiverAddress")
+	if sender == "" || receiver == "" {
+		return nil, ErrParams("Missing senderAddress or receiverAddress parameter")
+	}
+	if h.RPC == nil {
+		return nil, ErrParams("No interface available")
+	}
+	info, err := h.RPC.GetLinkInfo(sender, receiver)
+	if err != nil {
+		return nil, ErrObject("Link", sender+"->"+receiver)
+	}
+	return map[string]any{
+		"name":        info[hmconst.AttrName],
+		"description": info[hmconst.AttrDescription],
+	}, nil
+}
+
+func (h *Handlers) setLinkInfo(_ context.Context, params map[string]any) (any, error) {
+	sender := stringParam(params, "sender")
+	receiver := stringParam(params, "receiver")
+	if sender == "" || receiver == "" {
+		return nil, ErrParams("Missing sender or receiver parameter")
+	}
+	if h.RPC == nil {
+		return nil, ErrParams("No interface available")
+	}
+	ok, err := h.RPC.SetLinkInfo(sender, receiver, stringParam(params, "name"), stringParam(params, "description"))
+	if err != nil {
+		return nil, ErrObject("Link", sender+"->"+receiver)
+	}
+	return ok, nil
+}
+
+// determineParameter asks the interface to re-read a parameter.
+func (h *Handlers) determineParameter(_ context.Context, params map[string]any) (any, error) {
+	address := stringParam(params, "address")
+	parameterID := stringParam(params, "parameterId")
+	if address == "" || parameterID == "" {
+		return nil, ErrParams("Missing address or parameterId parameter")
+	}
+	if h.RPC == nil {
+		return nil, ErrParams("No interface available")
+	}
+	ok, err := h.RPC.DetermineParameter(address, stringParam(params, "paramsetKey"), parameterID)
+	if err != nil {
+		return nil, ErrObject("Parameter", address+"."+parameterID)
+	}
+	return ok, nil
+}
+
+// getParamsetId returns the identifier a client uses to validate a
+// cached paramset description.
+func (h *Handlers) getParamsetID(_ context.Context, params map[string]any) (any, error) {
+	address := stringParam(params, "address")
+	paramsetType := stringParam(params, "paramsetType")
+	if address == "" || paramsetType == "" {
+		return nil, ErrParams("Missing address or paramsetType parameter")
+	}
+	if h.RPC == nil {
+		return nil, ErrParams("No interface available")
+	}
+	id, err := h.RPC.GetParamsetID(address, paramsetType)
+	if err != nil {
+		return nil, ErrObject("Device", address)
+	}
+	return id, nil
+}
+
+// getSuppressedServiceMessages lists the service parameters silenced on
+// a channel.
+func (h *Handlers) getSuppressedServiceMessages(_ context.Context, params map[string]any) (any, error) {
+	address := stringParam(params, "channelAddress")
+	if address == "" {
+		return nil, ErrParams("Missing channelAddress parameter")
+	}
+	if h.RPC == nil {
+		return []string{}, nil
+	}
+	return h.RPC.SuppressedServiceMessages(address), nil
+}
+
+// suppressServiceMessages silences or un-silences a service parameter.
+// An empty parameterId covers every service parameter of the channel.
+func (h *Handlers) suppressServiceMessages(_ context.Context, params map[string]any) (any, error) {
+	address := stringParam(params, "channelAddress")
+	if address == "" {
+		return nil, ErrParams("Missing channelAddress parameter")
+	}
+	if h.RPC == nil {
+		return false, nil
+	}
+	return h.RPC.SuppressServiceMessage(
+		address,
+		stringParam(params, "parameterId"),
+		boolParam(params, "suppress", true),
+	), nil
+}
+
+// ccuVarType maps the simulator's internal type name to the CCU
+// nomenclature the JSON API reports. Only the methods added here use
+// it — SysVar.getAll keeps its established shape.
+func ccuVarType(varType string) string {
+	switch strings.ToUpper(varType) {
+	case "BOOL":
+		return "LOGIC"
+	case "FLOAT":
+		return "NUMBER"
+	case "ENUM":
+		return "LIST"
+	case "ALARM":
+		return "ALARM"
+	default:
+		return "STRING"
+	}
+}
+
+// sysvarGet answers SysVar.get: the full detail record of one variable,
+// addressed by its ReGa id. Conditional fields follow the CCU: names
+// only for LOGIC/ALARM, the value list only for LIST, bounds only for
+// NUMBER.
+func (h *Handlers) sysvarGet(_ context.Context, params map[string]any) (any, error) {
+	raw := stringParam(params, "id")
+	if raw == "" {
+		return nil, ErrParams("Missing id parameter")
+	}
+	id, err := strconv.Atoi(raw)
+	if err != nil {
+		return nil, ErrParams("Invalid id parameter")
+	}
+	sv, ok := h.State.SystemVariableByID(id)
+	if !ok {
+		return nil, ErrObject("SystemVariable", raw)
+	}
+	varType := ccuVarType(sv.VarType)
+	out := map[string]any{
+		"id":         strconv.Itoa(sv.ID),
+		"name":       sv.Name,
+		"type":       varType,
+		"unit":       sv.Unit,
+		"value":      sv.Value,
+		"channelId":  sv.ChannelAddress,
+		"isLogged":   false,
+		"isVisible":  true,
+		"isInternal": false,
+	}
+	switch varType {
+	case "LOGIC", "ALARM":
+		out["valueName0"] = "false"
+		out["valueName1"] = "true"
+	case "LIST":
+		out["valueList"] = sv.ValueList
+	case "NUMBER":
+		out["minValue"] = sv.MinValue
+		out["maxValue"] = sv.MaxValue
+	}
+	return out, nil
+}
+
+// sysvarCreate backs SysVar.createBool / createFloat / createEnum. The
+// CCU answers with the name, id and value of the new variable; without
+// these methods a client could never exercise the create→set→read→
+// delete lifecycle against the simulator.
+func (h *Handlers) sysvarCreate(varType string) HandlerFunc {
+	return func(_ context.Context, params map[string]any) (any, error) {
+		name := stringParam(params, "name")
+		if name == "" {
+			return nil, ErrParams("Missing name parameter")
+		}
+		if _, exists := h.State.SystemVariable(name); exists {
+			return nil, ErrParams("SystemVariable already exists")
+		}
+		opts := state.AddSystemVariableOpts{
+			ChannelAddress: stringParam(params, "chnID"),
+		}
+		var value any
+		switch varType {
+		case "BOOL":
+			value = boolParam(params, "init_val", false)
+		case "FLOAT":
+			opts.MinValue = floatParam(params, "minValue", 0)
+			opts.MaxValue = floatParam(params, "maxValue", 100)
+			value = opts.MinValue
+		case "ENUM":
+			opts.ValueList = stringParam(params, "valList")
+			value = 0
+		}
+		sv := h.State.AddSystemVariable(name, varType, value, opts)
+		return map[string]any{
+			"name":  sv.Name,
+			"id":    strconv.Itoa(sv.ID),
+			"value": sv.Value,
+		}, nil
+	}
+}
+
+// sysvarSetEnum backs SysVar.setEnum, which replaces the value list of
+// an enum variable and echoes it back (-1 on failure).
+func (h *Handlers) sysvarSetEnum(_ context.Context, params map[string]any) (any, error) {
+	name := stringParam(params, "name")
+	valueList := stringParam(params, "valueList")
+	if name == "" {
+		return nil, ErrParams("Missing name parameter")
+	}
+	sv, ok := h.State.SystemVariable(name)
+	if !ok {
+		return -1, nil
+	}
+	sv.ValueList = valueList
+	return valueList, nil
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Rooms / Subsections
 // ─────────────────────────────────────────────────────────────────
@@ -499,10 +1081,35 @@ func (h *Handlers) roomGetAll(_ context.Context, _ map[string]any) (any, error) 
 			"id":          strconv.Itoa(r.ID),
 			"name":        r.Name,
 			"description": r.Description,
-			"channelIds":  r.ChannelIDs,
+			"channelIds":  h.channelIDs(r.ChannelIDs),
 		})
 	}
 	return out, nil
+}
+
+// roomListAll answers Room.listAll, which on a CCU returns nothing but
+// the room ids — Room.getAll is the detailed variant. Without the
+// realistic schema both stay aliases, as they have been.
+func (h *Handlers) roomListAll(ctx context.Context, params map[string]any) (any, error) {
+	if !h.RealisticSchema {
+		return h.roomGetAll(ctx, params)
+	}
+	rooms := h.State.Rooms()
+	out := make([]string, 0, len(rooms))
+	for _, r := range rooms {
+		out = append(out, strconv.Itoa(r.ID))
+	}
+	return out, nil
+}
+
+// channelIDs converts stored channel addresses into the numeric ReGa
+// ids a client matches against Device.listAllDetail. Without ReGa ids
+// the addresses are reported unchanged.
+func (h *Handlers) channelIDs(addresses []string) any {
+	if !h.RegaIDs || h.State == nil {
+		return addresses
+	}
+	return h.State.ChannelIDsForAddresses(addresses)
 }
 
 func (h *Handlers) subsectionGetAll(_ context.Context, _ map[string]any) (any, error) {
@@ -513,7 +1120,7 @@ func (h *Handlers) subsectionGetAll(_ context.Context, _ map[string]any) (any, e
 			"id":          strconv.Itoa(f.ID),
 			"name":        f.Name,
 			"description": f.Description,
-			"channelIds":  f.ChannelIDs,
+			"channelIds":  h.channelIDs(f.ChannelIDs),
 		})
 	}
 	return out, nil
@@ -571,6 +1178,26 @@ func boolParam(params map[string]any, key string, def bool) bool {
 	if v, ok := params[key]; ok {
 		if b, ok := v.(bool); ok {
 			return b
+		}
+	}
+	return def
+}
+
+// floatParam reads a number that a client may send as a JSON number or
+// as a string (the CCU's own API accepts both).
+func floatParam(params map[string]any, key string, def float64) float64 {
+	v, ok := params[key]
+	if !ok {
+		return def
+	}
+	switch x := v.(type) {
+	case float64:
+		return x
+	case int:
+		return float64(x)
+	case string:
+		if f, err := strconv.ParseFloat(x, 64); err == nil {
+			return f
 		}
 	}
 	return def
