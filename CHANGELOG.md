@@ -9,6 +9,8 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-08-15
+
 ### Added — behaviour models (opt-in)
 
 - **A ReGa script interpreter** (`internal/regavm`) served under
