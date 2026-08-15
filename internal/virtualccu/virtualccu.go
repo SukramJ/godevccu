@@ -82,6 +82,15 @@ type Config struct {
 	// map keeps the single-endpoint behaviour, where XMLRPCPort serves
 	// every device.
 	InterfacePorts map[string]int
+	// RegaScriptPort serves HomeMatic Script under /tclrega.exe, the
+	// endpoint a CCU answers scripts on (8181) and the only way
+	// ccu-jack attaches to a central. 0 leaves it disabled; accepts
+	// [EphemeralPort], and the resolved port is written back.
+	//
+	// Scripts run through the interpreter in internal/regavm rather
+	// than the pattern matcher, so a script the matcher has never seen
+	// still produces real output.
+	RegaScriptPort int
 	// TLS enables the HTTPS twins of the API ports (the CCU exposes
 	// 42001/42010/49292/42000 alongside the plaintext ports, and 443
 	// alongside 80). The zero value leaves TLS off.
@@ -128,6 +137,10 @@ type VirtualCCU struct {
 	// ssdp announces the simulator on the network when discovery is
 	// enabled.
 	ssdp *ssdp.Responder
+
+	// regaScript serves the HomeMatic Script endpoint when
+	// [Config.RegaScriptPort] is set.
+	regaScript *regaServer
 
 	// tlsCert and tlsKey are the resolved certificate material shared
 	// by every TLS listener.
@@ -296,11 +309,12 @@ func (v *VirtualCCU) Start() error {
 	}
 
 	rpcFns, err := ccu.NewRPCFunctions(ccu.Options{
-		Devices:     v.cfg.Devices,
-		Persistence: v.cfg.Persistence,
-		Version:     version,
-		Logger:      v.logger,
-		OnSetValue:  v.cfg.OnSetValue,
+		Devices:       v.cfg.Devices,
+		Persistence:   v.cfg.Persistence,
+		Version:       version,
+		Logger:        v.logger,
+		OnSetValue:    v.cfg.OnSetValue,
+		NormalizeData: v.cfg.Realism.NormalizeData,
 	})
 	if err != nil {
 		return err
@@ -333,6 +347,11 @@ func (v *VirtualCCU) Start() error {
 			_ = v.xmlrpc.Stop()
 			return err
 		}
+	}
+
+	if err := v.startRegaScript(); err != nil {
+		_ = v.xmlrpc.Stop()
+		return err
 	}
 
 	// BIN-RPC is opt-in: only a run that configured a port gets the CUxD
@@ -450,6 +469,7 @@ func (v *VirtualCCU) Stop() error {
 	xmlSrv := v.xmlrpc
 	jsonSrv := v.jsonrpc
 	discovery := v.ssdp
+	_ = v.stopRegaScript()
 	v.xmlrpc = nil
 	v.jsonrpc = nil
 	v.ssdp = nil

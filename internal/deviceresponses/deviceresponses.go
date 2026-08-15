@@ -122,36 +122,36 @@ var levelToLevelReal = map[string]ParameterResponse{
 	},
 }
 
+// levelWithActivity models a dimmer: LEVEL plus the ACTIVITY_STATE a
+// real device reports alongside it.
+//
+// The simulator applies LEVEL immediately, so by the time the client
+// sees the event the move is over and ACTIVITY_STATE is idle. Reporting
+// a moving state next to a final LEVEL contradicts itself, and a client
+// that waits for the move to end waits forever. The moving phase is
+// available through the opt-in ramp simulation, which emits it and then
+// closes it out.
 var levelWithActivity = map[string]ParameterResponse{
 	"LEVEL": {
 		TriggerParam: "LEVEL",
 		ValueTransformer: func(v any, _ map[string]any) map[string]any {
-			activity := 2
-			if isZero(v) {
-				activity = 0
-			}
-			return map[string]any{"LEVEL": v, "ACTIVITY_STATE": activity}
+			return map[string]any{"LEVEL": v, "ACTIVITY_STATE": ActivityIdle}
 		},
 	},
 }
 
+// blindLevel models a shutter: LEVEL, the slat position LEVEL_2 and the
+// ACTIVITY_STATE that accompanies them.
+//
+// Like levelWithActivity, the state is idle because LEVEL is already
+// final when the event goes out. The previous version reported
+// ACTIVITY_STATE=1 (moving) and never followed up, so a cover client sat
+// on "moving" for the rest of the session.
 var blindLevel = map[string]ParameterResponse{
 	"LEVEL": {
 		TriggerParam: "LEVEL",
 		ValueTransformer: func(v any, current map[string]any) map[string]any {
-			// Same shape as levelWithActivity: HmIP-BROLL/HmIP-BBL/
-			// HmIP-FBL report ACTIVITY_STATE alongside LEVEL too, so a
-			// LEVEL write must synthesize it here as well. The ENUM
-			// index differs from the dimmer mapping (1 = moving, not
-			// levelWithActivity's 2) — a blind's ACTIVITY_STATE only
-			// distinguishes moving vs. idle from a LEVEL write, it
-			// does not know the direction (UP=1/DOWN=2 in the wire
-			// enum) without a target LEVEL to compare against.
-			activity := 1
-			if isZero(v) {
-				activity = 0
-			}
-			out := map[string]any{"LEVEL": v, "ACTIVITY_STATE": activity}
+			out := map[string]any{"LEVEL": v, "ACTIVITY_STATE": ActivityIdle}
 			if l2, ok := current["LEVEL_2"]; ok {
 				out["LEVEL_2"] = l2
 			}
@@ -385,4 +385,57 @@ func lookupOrDefault(current map[string]any, key string, def any) any {
 		return v
 	}
 	return def
+}
+
+// ACTIVITY_STATE values of the HomeMatic wire enum. A device reports
+// which way it is travelling while it moves, and idle once it has
+// arrived.
+const (
+	ActivityIdle = 0
+	ActivityUp   = 1
+	ActivityDown = 2
+)
+
+// RampParameters lists the parameters whose write starts a physical
+// movement, mapped to the parameter that reports its progress. Only
+// these gain a moving phase under the opt-in ramp simulation.
+var RampParameters = map[string]string{
+	"LEVEL":   "ACTIVITY_STATE",
+	"LEVEL_2": "ACTIVITY_STATE",
+}
+
+// ActivityForMove reports the direction a move takes, comparing the
+// target against the current position: opening travels up, closing
+// down. An unchanged position does not move at all.
+func ActivityForMove(target, current any) int {
+	t, okT := toFloat(target)
+	c, okC := toFloat(current)
+	if !okT || !okC || t == c {
+		return ActivityIdle
+	}
+	if t > c {
+		return ActivityUp
+	}
+	return ActivityDown
+}
+
+// toFloat coerces the loosely typed paramset values to a float.
+func toFloat(v any) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case float32:
+		return float64(x), true
+	case int:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case bool:
+		if x {
+			return 1, true
+		}
+		return 0, true
+	default:
+		return 0, false
+	}
 }

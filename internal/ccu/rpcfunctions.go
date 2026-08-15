@@ -97,6 +97,23 @@ type RPCFunctions struct {
 	serviceMessages bool
 	suppressed      map[string]map[string]struct{}
 
+	// normalizeData completes the embedded descriptions while loading;
+	// see normalize.go.
+	normalizeData bool
+
+	// System lifecycle automata; see lifecycle.go.
+	lifecycle      bool
+	lifecycleStep  time.Duration
+	installUntil   time.Time
+	installMode    int
+	installAddress string
+	firmwareTimers map[string]*time.Timer
+
+	// Actuator ramps; see ramps.go.
+	ramps        bool
+	rampDuration time.Duration
+	rampTimers   map[string]*time.Timer
+
 	// Device state machines; see reachability.go.
 	reachability        bool
 	configPendingFor    time.Duration
@@ -144,6 +161,11 @@ type Options struct {
 	// InterfaceID is the identifier the simulator reports to remote
 	// callbacks; defaults to "godevccu".
 	InterfaceID string
+	// NormalizeData completes the embedded device descriptions while
+	// loading: missing parameter IDs, UNIT: null, mistyped BOOL
+	// defaults and the firmware fields. The fixtures stay untouched —
+	// they are import targets, see normalize.go.
+	NormalizeData bool
 	// InterfaceFilter restricts the loaded catalogue to the devices of
 	// one protocol family ("BidCos-RF", "HmIP-RF", "BidCos-Wired",
 	// "VirtualDevices"), classified by type prefix. Empty loads
@@ -195,6 +217,7 @@ func NewRPCFunctions(opts Options) (*RPCFunctions, error) {
 		interfaceID:         ifID,
 		persistence:         opts.Persistence,
 		interfaceFilter:     opts.InterfaceFilter,
+		normalizeData:       opts.NormalizeData,
 		persistencePath:     persistencePath,
 		deviceByAddress:     make(map[string]map[string]any),
 		paramsetDescByAddr:  make(map[string]map[string]any),
@@ -209,6 +232,8 @@ func NewRPCFunctions(opts Options) (*RPCFunctions, error) {
 		metadata:            make(map[string]map[string]any),
 		remotes:             make(map[string]remoteCaller),
 		configPendingTimers: make(map[string]*time.Timer),
+		rampTimers:          make(map[string]*time.Timer),
+		firmwareTimers:      make(map[string]*time.Timer),
 		suppressed:          make(map[string]map[string]struct{}),
 		dispatchers:         make(map[string]*dispatcher),
 		onSetValue:          opts.OnSetValue,
@@ -277,7 +302,7 @@ func (r *RPCFunctions) RegisterParamsetCallback(cb EventCallback) {
 // honouring the optional restrict list. Returns the freshly loaded
 // device descriptions.
 func (r *RPCFunctions) loadDevices(restrict []string) ([]map[string]any, error) {
-	sets, err := loadAllDevices(restrict)
+	sets, err := loadAllDevices(restrict, r.normalizeData)
 	if err != nil {
 		return nil, err
 	}
@@ -632,7 +657,7 @@ func (r *RPCFunctions) GetDeviceDescription(address string) (map[string]any, err
 	defer r.mu.Unlock()
 	d, ok := r.deviceByAddress[strings.ToUpper(address)]
 	if !ok {
-		return nil, fmt.Errorf("%w: device %q not found", ErrRPC, address)
+		return nil, unknownDevice(address)
 	}
 	return d, nil
 }
@@ -648,11 +673,11 @@ func (r *RPCFunctions) GetParamsetDescription(address, paramsetType string) (map
 		desc, ok = r.paramsetDescByAddr[address]
 	}
 	if !ok {
-		return nil, fmt.Errorf("%w: paramset description for %q not found", ErrRPC, address)
+		return nil, unknownParamset(address, "")
 	}
 	ps, ok := desc[paramsetType].(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("%w: paramset %q not found on %q", ErrRPC, paramsetType, address)
+		return nil, unknownParamset(address, paramsetType)
 	}
 	return ps, nil
 }
@@ -694,11 +719,11 @@ func (r *RPCFunctions) GetParamset(address, paramsetKey string) (map[string]any,
 			desc, ok = r.paramsetDescByAddr[address]
 		}
 		if !ok {
-			return nil, fmt.Errorf("%w: paramset description for %q not found", ErrRPC, address)
+			return nil, unknownParamset(address, "")
 		}
 		ps, ok := desc[paramsetKey].(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("%w: paramset %q not found on %q", ErrRPC, paramsetKey, address)
+			return nil, unknownParamset(address, paramsetKey)
 		}
 		built := buildDefaults(ps)
 		r.paramsetDefaults[key] = built
@@ -745,7 +770,7 @@ func (r *RPCFunctions) getLinkParamsetDefaults(address string) (map[string]any, 
 		desc, ok = r.paramsetDescByAddr[address]
 	}
 	if !ok {
-		return nil, fmt.Errorf("%w: paramset description for %q not found", ErrRPC, address)
+		return nil, unknownParamset(address, "")
 	}
 	ps, ok := desc[hmconst.ParamsetAttrLink].(map[string]any)
 	if !ok {
@@ -763,7 +788,7 @@ func (r *RPCFunctions) GetValue(address, valueKey string) (any, error) {
 	}
 	v, ok := values[valueKey]
 	if !ok {
-		return nil, fmt.Errorf("%w: value key %q not found on %q", ErrRPC, valueKey, address)
+		return nil, unknownParameter(address, valueKey)
 	}
 	return v, nil
 }
@@ -822,12 +847,12 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 	}
 	if desc == nil {
 		r.mu.Unlock()
-		return fmt.Errorf("%w: paramset description for %q not found", ErrRPC, address)
+		return unknownParamset(address, "")
 	}
 	paramDescs, ok := desc[paramsetKey].(map[string]any)
 	if !ok {
 		r.mu.Unlock()
-		return fmt.Errorf("%w: paramset %q not found on %q", ErrRPC, paramsetKey, address)
+		return unknownParamset(address, paramsetKey)
 	}
 	deviceType := r.deviceTypeForAddressLocked(addrUp)
 
@@ -836,6 +861,14 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 		value any
 	}
 	var toFire []firedEvent
+	// rampWrite records what a VALUES write moved, so the ramp phase
+	// can be reported once the lock is released.
+	type rampWrite struct {
+		valueKey string
+		target   any
+		previous any
+	}
+	var ramped []rampWrite
 	for valueKey, value := range paramset {
 		paramData, ok := paramDescs[valueKey].(map[string]any)
 		if !ok {
@@ -877,7 +910,7 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 		case hmconst.ParamsetTypeEnum:
 			if err := validateEnumBounds(converted, paramData); err != nil {
 				r.mu.Unlock()
-				return fmt.Errorf("%w: %s.%s: %v", ErrRPC, address, valueKey, err)
+				return invalidValue(address, valueKey, err)
 			}
 		case hmconst.ParamsetTypeFloat, hmconst.ParamsetTypeInteger:
 			converted = clampNumeric(converted, paramData, paramType)
@@ -890,11 +923,23 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 		if _, ok := r.paramsets[addrUp][paramsetKey]; !ok {
 			r.paramsets[addrUp][paramsetKey] = make(map[string]any)
 		}
+		previousValue := r.paramsets[addrUp][paramsetKey][valueKey]
 		r.paramsets[addrUp][paramsetKey][valueKey] = converted
 		r.paramsetDirty[psKey(addrUp, paramsetKey)] = struct{}{}
 
 		current := r.paramsets[addrUp][paramsetKey]
+		if paramsetKey == hmconst.ParamsetAttrValues {
+			ramped = append(ramped, rampWrite{valueKey: valueKey, target: converted, previous: previousValue})
+		}
 		response := deviceresponses.ComputeEvents(deviceType, valueKey, converted, current)
+		if r.ramps {
+			// The ramp owns the progress parameter while it is
+			// enabled; letting the response table report its idle state
+			// too would put an idle edge in front of the moving one.
+			if progress, ramped := deviceresponses.RampParameters[valueKey]; ramped {
+				delete(response, progress)
+			}
+		}
 		for k, v := range response {
 			r.paramsets[addrUp][paramsetKey][k] = v
 			toFire = append(toFire, firedEvent{key: k, value: v})
@@ -914,6 +959,9 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 		for valueKey, value := range paramset {
 			hook(address, valueKey, value)
 		}
+	}
+	for _, rw := range ramped {
+		r.notifyRamp(address, rw.valueKey, rw.target, rw.previous)
 	}
 	if paramsetKey == hmconst.ParamsetAttrMaster && len(paramset) > 0 {
 		// A configuration write does not take effect immediately: the
@@ -1142,7 +1190,7 @@ func (r *RPCFunctions) GetMetadata(objectID, dataID string) (any, error) {
 	}
 	d, ok := r.deviceByAddress[addr]
 	if !ok {
-		return nil, fmt.Errorf("%w: device %q not found", ErrRPC, objectID)
+		return nil, unknownDevice(objectID)
 	}
 	if v, ok := d[dataID]; ok {
 		return v, nil
@@ -1223,7 +1271,7 @@ func (r *RPCFunctions) GetParamsetID(address, paramsetType string) (string, erro
 	defer r.mu.Unlock()
 	d, ok := r.deviceByAddress[addrUp]
 	if !ok {
-		return "", fmt.Errorf("%w: device %q not found", ErrRPC, address)
+		return "", unknownDevice(address)
 	}
 	typeStr, _ := d[hmconst.AttrType].(string)
 	if typeStr == "" {
@@ -1380,13 +1428,7 @@ func (r *RPCFunctions) GetLinks(channelAddress string, _ int) []any {
 	}
 	return out
 }
-func (r *RPCFunctions) GetInstallMode() int { return 0 }
-func (r *RPCFunctions) SetInstallMode(_ bool, _ int, _ int, _ string) bool {
-	return true
-}
 func (r *RPCFunctions) ReportValueUsage(_, _ string, _ int) bool { return true }
-func (r *RPCFunctions) InstallFirmware(_ string) bool            { return true }
-func (r *RPCFunctions) UpdateFirmware(_ string) bool             { return true }
 
 // ─────────────────────────────────────────────────────────────────
 // Persistence

@@ -38,6 +38,10 @@ type Server struct {
 	// when set; see basicauth.go.
 	authenticator Authenticator
 
+	// faultCodes reports the HomeMatic fault catalogue instead of the
+	// generic -1; see faults.go.
+	faultCodes bool
+
 	// ready models the CCU boot state. A booting CCU refuses every
 	// remote API port with 503 — not just the web API — so a client
 	// that probes XML-RPC during startup sees the same "still coming
@@ -263,7 +267,7 @@ func (s *Server) registerMethods() {
 		address, _ := xmlrpc.AsString(params[0])
 		d, err := rpc.GetDeviceDescription(address)
 		if err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.FromAny(any(d)), nil
 	})
@@ -276,7 +280,7 @@ func (s *Server) registerMethods() {
 		paramsetType, _ := xmlrpc.AsString(params[1])
 		d, err := rpc.GetParamsetDescription(address, paramsetType)
 		if err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.FromAny(any(d)), nil
 	})
@@ -289,7 +293,7 @@ func (s *Server) registerMethods() {
 		key, _ := xmlrpc.AsString(params[1])
 		d, err := rpc.GetParamset(address, key)
 		if err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.FromAny(any(d)), nil
 	})
@@ -302,7 +306,7 @@ func (s *Server) registerMethods() {
 		valueKey, _ := xmlrpc.AsString(params[1])
 		v, err := rpc.GetValue(address, valueKey)
 		if err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.FromAny(v), nil
 	})
@@ -319,7 +323,7 @@ func (s *Server) registerMethods() {
 			force, _ = xmlrpc.AsBool(params[3])
 		}
 		if err := rpc.SetValue(address, valueKey, value, force); err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.StringValue(""), nil
 	})
@@ -337,7 +341,7 @@ func (s *Server) registerMethods() {
 			force, _ = xmlrpc.AsBool(params[3])
 		}
 		if err := rpc.PutParamset(address, key, paramset, force); err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.NilValue{}, nil
 	})
@@ -362,7 +366,7 @@ func (s *Server) registerMethods() {
 		dataID, _ := xmlrpc.AsString(params[1])
 		v, err := rpc.GetMetadata(objectID, dataID)
 		if err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.FromAny(v), nil
 	})
@@ -399,7 +403,7 @@ func (s *Server) registerMethods() {
 		}
 		ok, err := rpc.DetermineParameter(address, second, third)
 		if err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.BoolValue(ok), nil
 	})
@@ -412,7 +416,7 @@ func (s *Server) registerMethods() {
 		paramsetType, _ := xmlrpc.AsString(params[1])
 		id, err := rpc.GetParamsetID(address, paramsetType)
 		if err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.StringValue(id), nil
 	})
@@ -429,7 +433,7 @@ func (s *Server) registerMethods() {
 		}
 		ok, err := rpc.ActivateLinkParamset(address, peer, longPress)
 		if err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.BoolValue(ok), nil
 	})
@@ -442,7 +446,7 @@ func (s *Server) registerMethods() {
 		receiver, _ := xmlrpc.AsString(params[1])
 		info, err := rpc.GetLinkInfo(sender, receiver)
 		if err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.FromAny(any(info)), nil
 	})
@@ -457,7 +461,7 @@ func (s *Server) registerMethods() {
 		description, _ := xmlrpc.AsString(params[3])
 		ok, err := rpc.SetLinkInfo(sender, receiver, name, description)
 		if err != nil {
-			return nil, faultFromErr(err)
+			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.BoolValue(ok), nil
 	})
@@ -603,8 +607,9 @@ func (s *Server) registerMethods() {
 	})
 }
 
-// faultFromErr translates an internal error into an XML-RPC fault.
-func faultFromErr(err error) error {
+// faultFromErr translates an internal error into an XML-RPC fault,
+// classifying it by cause when the catalogue is enabled.
+func (s *Server) faultFromErr(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -612,5 +617,8 @@ func faultFromErr(err error) error {
 	if errors.As(err, &fault) {
 		return fault
 	}
-	return &xmlrpc.Fault{Code: -1, Message: err.Error()}
+	s.mu.Lock()
+	catalogue := s.faultCodes
+	s.mu.Unlock()
+	return &xmlrpc.Fault{Code: faultCodeFor(err, catalogue), Message: err.Error()}
 }

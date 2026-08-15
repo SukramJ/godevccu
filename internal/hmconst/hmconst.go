@@ -79,6 +79,9 @@ const (
 	AttrFlags       = "FLAGS"
 	AttrError       = "ERROR"
 	AttrDescription = "DESCRIPTION"
+	// AttrFirmwareUpdateState is the maintenance parameter a CCU walks
+	// through while a device firmware update is under way.
+	AttrFirmwareUpdateState = "FIRMWARE_UPDATE_STATE"
 	// AttrPong is the parameter a CCU reports on the CENTRAL
 	// pseudo-address to answer a ping; the value is the caller id the
 	// client passed to ping.

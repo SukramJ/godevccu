@@ -45,6 +45,10 @@ switches everything on.
 | `Discovery` | SSDP on UDP 1900 plus `/upnp/basic_dev.cgi`. |
 | `BasicAuth` | HTTP basic authentication (realm `theRealm`) on the XML-RPC surface for non-loopback callers. The web API is deliberately exempt — it authenticates by session, as on a CCU. Requires `AuthEnabled`. |
 | `BackupAPI` | `/api/backup/*` and a backup that actually reaches "completed". |
+| `Lifecycle` | Pairing counts down (`getInstallMode` reports the remainder) and a firmware update walks `FIRMWARE_UPDATE_STATE` through its progression. |
+| `Ramps` | An actuator move reports a travelling `ACTIVITY_STATE` first and the idle state after the travel time. The value itself still lands immediately. |
+| `FaultCodes` | The HomeMatic fault catalogue (−2/−4/−5/−6) instead of answering everything with −1, which clients read as "retryable". |
+| `NormalizeData` | Completes the embedded descriptions while loading: missing parameter `ID`s, `UNIT: null` (which serialises as `<nil/>`), mistyped BOOL defaults, empty firmware fields. The fixtures stay untouched. |
 
 ### Separate interface listeners
 
@@ -62,6 +66,25 @@ v, _ := godevccu.New(godevccu.Config{
 `VirtualCCU.InterfaceAddr(name)` and `InterfaceRPC(name)` reach an
 individual listener. A nil map keeps the single-endpoint behaviour,
 where `XMLRPCPort` serves every device.
+
+### ReGa script endpoint
+
+`Config.RegaScriptPort` serves HomeMatic Script under `/tclrega.exe`
+(8181 on a CCU) — the endpoint ccu-jack attaches through, and the only
+way a client can run a script the pattern matcher has never seen.
+
+Scripts run through the interpreter in `internal/regavm`, which covers
+the language the shipped scripts actually use: the seven declaration
+keywords, `if`/`elseif`/`else`, `foreach`, `while`, the `#`
+concatenation operator, the string methods and the `dom`/`system`/
+`interfaces` namespaces. Anything outside that surfaces as an error
+rather than a wrong answer.
+
+```go
+v, _ := godevccu.New(godevccu.Config{
+    RegaScriptPort: godevccu.PortRegaScript,
+})
+```
 
 ### TLS
 

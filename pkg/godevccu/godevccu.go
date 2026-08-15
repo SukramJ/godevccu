@@ -74,6 +74,10 @@ const (
 	InterfaceVirtualDevices = hmconst.InterfaceVirtualDevices
 )
 
+// PortRegaScript is the port a CCU serves HomeMatic Script on, ready to
+// be passed as [Config.RegaScriptPort].
+const PortRegaScript = virtualccu.PortRegaScript
+
 // DefaultInterfacePorts is the port a CCU serves each interface on,
 // ready to be passed as [Config.InterfacePorts].
 func DefaultInterfacePorts() map[string]int {

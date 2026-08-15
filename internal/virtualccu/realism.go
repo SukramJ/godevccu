@@ -82,6 +82,31 @@ type Realism struct {
 	// and completes the backup lifecycle (start → running → completed →
 	// download) rather than leaving every backup "running" forever.
 	BackupAPI bool
+
+	// Lifecycle runs the pairing and firmware automata: setInstallMode
+	// starts a countdown getInstallMode reports, and a firmware update
+	// walks FIRMWARE_UPDATE_STATE through the states a CCU reports.
+	// Without it both are the constants they have always been.
+	Lifecycle bool
+
+	// Ramps stretches an actuator move over its travel time: a LEVEL
+	// write is answered with a moving ACTIVITY_STATE in the reported
+	// direction, and the idle state follows. The value itself still
+	// lands immediately, so a test never waits to read it back.
+	Ramps bool
+
+	// FaultCodes reports the HomeMatic fault catalogue (-2 unknown
+	// paramset, -4 unknown device, -5 unknown parameter, -6 invalid
+	// value) instead of answering every failure with -1. Clients decide
+	// from the code whether a call is worth retrying, and -1 lands in
+	// the retryable bucket.
+	FaultCodes bool
+
+	// NormalizeData completes the embedded device descriptions while
+	// loading: the missing parameter IDs, the UNIT: null that
+	// serialises as <nil/>, mistyped BOOL defaults and the firmware
+	// fields. The fixtures stay untouched — they are import targets.
+	NormalizeData bool
 }
 
 // RealismCCU returns a [Realism] with every behaviour enabled — the
@@ -100,6 +125,10 @@ func RealismCCU() Realism {
 		Discovery:       true,
 		BasicAuth:       true,
 		BackupAPI:       true,
+		Lifecycle:       true,
+		Ramps:           true,
+		FaultCodes:      true,
+		NormalizeData:   true,
 	}
 }
 

@@ -12,7 +12,7 @@ import "testing"
 // so a caller-supplied marketing spelling like "HmIP-PS" must still
 // resolve against the all-caps fixture.
 func TestLoadAllDevicesRestrictIsCaseInsensitive(t *testing.T) {
-	sets, err := loadAllDevices([]string{"HmIP-PS"})
+	sets, err := loadAllDevices([]string{"HmIP-PS"}, false)
 	if err != nil {
 		t.Fatalf("loadAllDevices(HmIP-PS): %v", err)
 	}
@@ -20,7 +20,7 @@ func TestLoadAllDevicesRestrictIsCaseInsensitive(t *testing.T) {
 		t.Fatal("loadAllDevices(HmIP-PS) returned no device sets")
 	}
 
-	sets, err = loadAllDevices([]string{"HmIP-SWDO"})
+	sets, err = loadAllDevices([]string{"HmIP-SWDO"}, false)
 	if err != nil {
 		t.Fatalf("loadAllDevices(HmIP-SWDO): %v", err)
 	}
@@ -32,7 +32,7 @@ func TestLoadAllDevicesRestrictIsCaseInsensitive(t *testing.T) {
 // TestLoadAllDevicesRestrictExactCaseStillWorks locks in that the fix
 // does not regress the already-working exact-case lookups.
 func TestLoadAllDevicesRestrictExactCaseStillWorks(t *testing.T) {
-	sets, err := loadAllDevices([]string{"HmIP-BSM"})
+	sets, err := loadAllDevices([]string{"HmIP-BSM"}, false)
 	if err != nil {
 		t.Fatalf("loadAllDevices(HmIP-BSM): %v", err)
 	}

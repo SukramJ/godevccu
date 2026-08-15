@@ -9,6 +9,7 @@ package ccu_test
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -395,4 +396,87 @@ func TestInitRegistrationsForgottenByDefault(t *testing.T) {
 	if second.ClientServerInitialized(interfaceID) {
 		t.Fatal("registration restored without opting in")
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Actuator ramps
+// ─────────────────────────────────────────────────────────────────
+
+// TestRampReportsMovingThenIdle covers the state sequence a cover
+// client follows: the write is answered with a moving direction, and
+// the idle state closes it out. Without ramps the activity state is
+// idle from the start, because the value is already final.
+func TestRampReportsMovingThenIdle(t *testing.T) {
+	rpc, err := ccu.NewRPCFunctions(ccu.Options{Devices: []string{"HmIP-BROLL"}})
+	if err != nil {
+		t.Fatalf("NewRPCFunctions: %v", err)
+	}
+	rpc.EnableRamps(40 * time.Millisecond)
+	root := rootAddress(t, rpc)
+	channel := root + ":4"
+
+	rec := &eventRecorder{}
+	rpc.RegisterParamsetCallback(rec.record)
+
+	if err := rpc.PutParamset(channel, "VALUES", map[string]any{"LEVEL": 1.0}, true); err != nil {
+		// Not every catalogue build puts LEVEL on channel 4; find it.
+		channel = channelWithParameter(t, rpc, root, "LEVEL")
+		if err := rpc.PutParamset(channel, "VALUES", map[string]any{"LEVEL": 1.0}, true); err != nil {
+			t.Fatalf("PutParamset: %v", err)
+		}
+	}
+
+	// Wait for the falling edge, not just for two values: the sequence
+	// is moving → idle, and checking too early sees only the first.
+	if !waitFor(t, func() bool {
+		states := rec.valuesOf("ACTIVITY_STATE")
+		return len(states) >= 2 && states[len(states)-1] == 0
+	}) {
+		t.Fatalf("ramp never completed, states: %v", rec.valuesOf("ACTIVITY_STATE"))
+	}
+	states := rec.valuesOf("ACTIVITY_STATE")
+	if states[0] != 1 && states[0] != 2 {
+		t.Errorf("first ACTIVITY_STATE = %v, want a moving direction", states[0])
+	}
+}
+
+// Without ramps a write reports the final state only.
+func TestNoRampByDefault(t *testing.T) {
+	rpc, err := ccu.NewRPCFunctions(ccu.Options{Devices: []string{"HmIP-BROLL"}})
+	if err != nil {
+		t.Fatalf("NewRPCFunctions: %v", err)
+	}
+	root := rootAddress(t, rpc)
+	channel := channelWithParameter(t, rpc, root, "LEVEL")
+
+	rec := &eventRecorder{}
+	rpc.RegisterParamsetCallback(rec.record)
+	if err := rpc.PutParamset(channel, "VALUES", map[string]any{"LEVEL": 1.0}, true); err != nil {
+		t.Fatalf("PutParamset: %v", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+
+	for _, s := range rec.valuesOf("ACTIVITY_STATE") {
+		if s != 0 {
+			t.Fatalf("ACTIVITY_STATE = %v without ramps, want idle throughout", s)
+		}
+	}
+}
+
+// channelWithParameter finds a channel carrying the given VALUES
+// parameter.
+func channelWithParameter(t *testing.T, rpc *ccu.RPCFunctions, root, parameter string) string {
+	t.Helper()
+	for i := range 12 {
+		channel := root + ":" + strconv.Itoa(i)
+		description, err := rpc.GetParamsetDescription(channel, "VALUES")
+		if err != nil {
+			continue
+		}
+		if _, ok := description[parameter]; ok {
+			return channel
+		}
+	}
+	t.Fatalf("no channel of %s carries %s", root, parameter)
+	return ""
 }
