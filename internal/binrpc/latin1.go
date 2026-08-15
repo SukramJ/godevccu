@@ -33,3 +33,25 @@ func latin1Encode(s string) ([]byte, error) {
 	}
 	return out, nil
 }
+
+// DecodeLatin1 converts Latin-1 bytes to a UTF-8 string. Exported
+// because the ReGa script endpoint speaks the same encoding as this
+// transport does: a CCU is ISO-8859-1 throughout.
+func DecodeLatin1(raw []byte) string { return latin1Decode(raw) }
+
+// EncodeLatin1 converts a UTF-8 string to Latin-1 bytes, substituting
+// "?" for runes Latin-1 cannot hold. The lossy form exists for the HTTP
+// surface, where refusing to answer over one unrepresentable character
+// in a device name would be worse than the substitution; the wire
+// encoder keeps the strict behaviour.
+func EncodeLatin1(s string) []byte {
+	out := make([]byte, 0, len(s))
+	for _, r := range s {
+		if r > 0xFF {
+			out = append(out, '?')
+			continue
+		}
+		out = append(out, byte(r))
+	}
+	return out
+}

@@ -29,7 +29,9 @@ type loadedDeviceSet struct {
 // loadAllDevices walks the embedded data set and returns one entry per
 // device type. When restrict is non-empty only the named device types
 // are loaded.
-func loadAllDevices(restrict []string) ([]loadedDeviceSet, error) {
+// loadAllDevices reads the embedded catalogue. With normalize set the
+// descriptions are completed on the way in; see normalize.go.
+func loadAllDevices(restrict []string, normalize bool) ([]loadedDeviceSet, error) {
 	dd := emb.DeviceDescriptions()
 	pd := emb.ParamsetDescriptions()
 
@@ -89,6 +91,9 @@ func loadAllDevices(restrict []string) ([]loadedDeviceSet, error) {
 				set.rootDeviceAddr = addr
 				break
 			}
+		}
+		if normalize {
+			normalizeDeviceSet(&set)
 		}
 		out = append(out, set)
 		return nil

@@ -9,6 +9,58 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added — behaviour models (opt-in)
+
+- **A ReGa script interpreter** (`internal/regavm`) served under
+  `/tclrega.exe` via `Config.RegaScriptPort` — the endpoint a CCU
+  answers scripts on (8181) and the only way ccu-jack attaches to a
+  central. Where the pattern engine *recognises* known scripts, this
+  *runs* them, so a script it has never seen still produces real data.
+  Covers the language the shipped scripts use: the declaration
+  keywords, `if`/`elseif`/`else`, `foreach`, `while`, the `#`
+  concatenation operator, the string methods and the `dom`, `system`
+  and `interfaces` namespaces. Anything outside that reports an error
+  rather than a wrong answer, and every loop is bounded so a runaway
+  script fails instead of wedging the request it arrived on.
+
+- **Pairing and firmware automata** (`Realism.Lifecycle`).
+  `setInstallMode` starts a countdown that `getInstallMode` reports as
+  the remaining seconds — it answered a constant 0 before — and a
+  firmware update walks `FIRMWARE_UPDATE_STATE` from
+  `DELIVER_FIRMWARE_IMAGE` through `READY_FOR_UPDATE` and
+  `PERFORMING_UPDATE` to `UP_TO_DATE`, where `installFirmware` used to
+  be `return true`.
+
+- **Actuator ramps** (`Realism.Ramps`). A move reports a travelling
+  `ACTIVITY_STATE` in the direction it goes, and the idle state after
+  the travel time. The value still lands immediately, so a test never
+  waits to read it back; only the activity phase is stretched. A second
+  write while a move is in flight retargets it rather than emitting
+  another rising edge.
+
+- **The HomeMatic fault catalogue** (`Realism.FaultCodes`): −2 unknown
+  paramset, −4 unknown device, −5 unknown parameter, −6 invalid value,
+  instead of answering every failure with −1. Clients classify their
+  retry behaviour by the code, and −1 lands in the retryable bucket —
+  so an unknown device was retried forever.
+
+- **Load-time data normalisation** (`Realism.NormalizeData`), which
+  closes the gaps in the imported catalogue without touching the
+  fixtures: 25850 parameter descriptions carried no `ID`, 18393 carried
+  `UNIT: null` (serialised as `<nil/>`), 1626 BOOL parameters carried a
+  numeric `DEFAULT`, 1387 device descriptions an empty `FIRMWARE`, and
+  270 reported `UPDATABLE` as an integer.
+
+### Fixed — actuator activity state
+
+- **A blind or dimmer no longer reports itself as permanently moving.**
+  `blindLevel` answered a LEVEL write with `ACTIVITY_STATE=1` (moving)
+  and never followed up, so a cover client sat on "moving" for the rest
+  of the session; `levelWithActivity` did the same with 2. The
+  simulator applies LEVEL immediately, so the move is over by the time
+  the event goes out and the state is idle. The moving phase is
+  available through `Realism.Ramps`, which emits it *and* closes it out.
+
 ### Added — CCU realism (opt-in)
 
 Every behaviour below sits behind `Config.Realism` or an explicit

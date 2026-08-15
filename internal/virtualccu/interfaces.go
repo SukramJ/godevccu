@@ -82,6 +82,7 @@ func (v *VirtualCCU) startInterface(name string, port int, version string) (*int
 		OnSetValue:      v.cfg.OnSetValue,
 		InterfaceID:     name,
 		InterfaceFilter: name,
+		NormalizeData:   v.cfg.Realism.NormalizeData,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("virtualccu: interface %s: %w", name, err)
@@ -171,6 +172,12 @@ func (v *VirtualCCU) applyRealism(rpcFns *ccu.RPCFunctions) {
 	if v.cfg.Realism.PersistInit {
 		rpcFns.EnableInitPersistence()
 	}
+	if v.cfg.Realism.Lifecycle {
+		rpcFns.EnableLifecycle(0)
+	}
+	if v.cfg.Realism.Ramps {
+		rpcFns.EnableRamps(0)
+	}
 }
 
 // applyServerRealism switches on the behaviours that live on the
@@ -181,6 +188,7 @@ func (v *VirtualCCU) applyServerRealism(srv *ccu.Server) {
 	if v.cfg.Realism.BasicAuth && v.cfg.AuthEnabled {
 		srv.EnableBasicAuth(v.session.CheckCredentials)
 	}
+	srv.EnableFaultCodes(v.cfg.Realism.FaultCodes)
 }
 
 // backupCompletionDelay is how long a simulated backup runs before it

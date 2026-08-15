@@ -27,14 +27,20 @@ func TestPrefixMatch(t *testing.T) {
 	}
 }
 
+// TestLevelWithActivity pins that a dimmer reports an *idle* activity
+// state: the simulator applies LEVEL immediately, so the move is over by
+// the time the client sees the event. A moving state next to a final
+// LEVEL contradicts itself and leaves a client waiting for an end that
+// never comes. The moving phase belongs to the opt-in ramp simulation.
 func TestLevelWithActivity(t *testing.T) {
-	out := deviceresponses.ComputeEvents("HmIP-BDT", "LEVEL", 0.0, nil)
-	if got := out["ACTIVITY_STATE"]; got != 0 {
-		t.Fatalf("ACTIVITY_STATE for level 0 = %v, want 0", got)
-	}
-	out = deviceresponses.ComputeEvents("HmIP-BDT", "LEVEL", 0.5, nil)
-	if got := out["ACTIVITY_STATE"]; got != 2 {
-		t.Fatalf("ACTIVITY_STATE for non-zero = %v, want 2", got)
+	for _, level := range []any{0.0, 0.5, 1.0} {
+		out := deviceresponses.ComputeEvents("HmIP-BDT", "LEVEL", level, nil)
+		if got := out["ACTIVITY_STATE"]; got != deviceresponses.ActivityIdle {
+			t.Fatalf("ACTIVITY_STATE for level %v = %v, want idle", level, got)
+		}
+		if out["LEVEL"] != level {
+			t.Fatalf("LEVEL = %v, want %v", out["LEVEL"], level)
+		}
 	}
 }
 
@@ -76,22 +82,39 @@ func TestMappingCaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestBlindLevelActivityState locks in G5: a LEVEL write on the
-// HmIP-BROLL/HmIP-BBL/HmIP-FBL blind actuators must also synthesize
-// ACTIVITY_STATE, symmetric with levelWithActivity's dimmer behaviour.
+// TestBlindLevelActivityState pins the shutter counterpart: a LEVEL
+// write reports ACTIVITY_STATE alongside it, and that state is idle
+// because LEVEL is already final. Reporting "moving" without ever
+// closing it out left a cover client stuck on "moving" for the rest of
+// the session.
 func TestBlindLevelActivityState(t *testing.T) {
-	out := deviceresponses.ComputeEvents("HmIP-BROLL", "LEVEL", 0.0, nil)
-	if got := out["ACTIVITY_STATE"]; got != 0 {
-		t.Fatalf("ACTIVITY_STATE for LEVEL 0 = %v, want 0 (idle)", got)
+	for _, deviceType := range []string{"HmIP-BROLL", "HmIP-BBL", "HmIP-FBL"} {
+		for _, level := range []any{0.0, 0.5, 1.0} {
+			out := deviceresponses.ComputeEvents(deviceType, "LEVEL", level, nil)
+			if got := out["ACTIVITY_STATE"]; got != deviceresponses.ActivityIdle {
+				t.Fatalf("%s ACTIVITY_STATE for LEVEL %v = %v, want idle", deviceType, level, got)
+			}
+		}
 	}
-	out = deviceresponses.ComputeEvents("HmIP-BROLL", "LEVEL", 0.5, nil)
-	if got := out["ACTIVITY_STATE"]; got != 1 {
-		t.Fatalf("ACTIVITY_STATE for non-zero LEVEL = %v, want 1 (moving)", got)
+}
+
+// TestActivityForMove covers the direction a ramp reports while it is
+// under way.
+func TestActivityForMove(t *testing.T) {
+	cases := []struct {
+		target, current any
+		want            int
+	}{
+		{1.0, 0.0, deviceresponses.ActivityUp},
+		{0.0, 1.0, deviceresponses.ActivityDown},
+		{0.5, 0.5, deviceresponses.ActivityIdle},
+		{0.5, nil, deviceresponses.ActivityIdle},
+		{"nonsense", 0.0, deviceresponses.ActivityIdle},
 	}
-	// HmIP-BBL/HmIP-FBL share the same blindLevel table.
-	out = deviceresponses.ComputeEvents("HmIP-BBL", "LEVEL", 1.0, nil)
-	if got := out["ACTIVITY_STATE"]; got != 1 {
-		t.Fatalf("HmIP-BBL ACTIVITY_STATE for non-zero LEVEL = %v, want 1", got)
+	for _, c := range cases {
+		if got := deviceresponses.ActivityForMove(c.target, c.current); got != c.want {
+			t.Errorf("ActivityForMove(%v, %v) = %d, want %d", c.target, c.current, got, c.want)
+		}
 	}
 }
 

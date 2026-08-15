@@ -148,4 +148,6 @@ func (r *RPCFunctions) stopTimers() {
 	for _, t := range timers {
 		t.Stop()
 	}
+	r.stopRampTimers()
+	r.stopLifecycleTimers()
 }
