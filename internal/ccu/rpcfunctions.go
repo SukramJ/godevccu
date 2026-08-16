@@ -673,7 +673,7 @@ func (r *RPCFunctions) GetParamsetDescription(address, paramsetType string) (map
 		desc, ok = r.paramsetDescByAddr[address]
 	}
 	if !ok {
-		return nil, unknownParamset(address, "")
+		return nil, unknownDevice(address)
 	}
 	ps, ok := desc[paramsetType].(map[string]any)
 	if !ok {
@@ -691,15 +691,22 @@ func (r *RPCFunctions) GetParamsetDescription(address, paramsetType string) (map
 // registered via AddLink.
 func (r *RPCFunctions) GetParamset(address, paramsetKey string) (map[string]any, error) {
 	// Detect the LINK peer-address form: anything that is not one of the
-	// three known literal keys is treated as a peer channel address.
+	// three known literal keys may be a peer channel address.
 	if paramsetKey != hmconst.ParamsetAttrMaster && paramsetKey != hmconst.ParamsetAttrValues {
 		if paramsetKey == hmconst.ParamsetAttrLink {
 			// Caller passed the literal "LINK" key — not the peer-address form.
 			// Return defaults from the description.
 			return r.getLinkParamsetDefaults(address)
 		}
-		// Treat paramsetKey as a peer channel address (LINK pair form).
-		return r.GetLinkParamset(address, paramsetKey)
+		// A peer address carries a channel index; a paramset name does
+		// not. Without that distinction every misspelt or unsupported
+		// paramset name fell into the LINK branch and came back as the
+		// empty map a channel without links returns — a silent success
+		// where a CCU faults with "Unknown paramset".
+		if strings.Contains(paramsetKey, ":") {
+			return r.GetLinkParamset(address, paramsetKey)
+		}
+		return nil, unknownParamset(address, paramsetKey)
 	}
 	addrUp := strings.ToUpper(address)
 	r.mu.Lock()
@@ -719,7 +726,7 @@ func (r *RPCFunctions) GetParamset(address, paramsetKey string) (map[string]any,
 			desc, ok = r.paramsetDescByAddr[address]
 		}
 		if !ok {
-			return nil, unknownParamset(address, "")
+			return nil, unknownDevice(address)
 		}
 		ps, ok := desc[paramsetKey].(map[string]any)
 		if !ok {
@@ -770,7 +777,7 @@ func (r *RPCFunctions) getLinkParamsetDefaults(address string) (map[string]any, 
 		desc, ok = r.paramsetDescByAddr[address]
 	}
 	if !ok {
-		return nil, unknownParamset(address, "")
+		return nil, unknownDevice(address)
 	}
 	ps, ok := desc[hmconst.ParamsetAttrLink].(map[string]any)
 	if !ok {
@@ -847,7 +854,7 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 	}
 	if desc == nil {
 		r.mu.Unlock()
-		return unknownParamset(address, "")
+		return unknownDevice(address)
 	}
 	paramDescs, ok := desc[paramsetKey].(map[string]any)
 	if !ok {
