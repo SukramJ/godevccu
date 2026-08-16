@@ -9,34 +9,9 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
-## [0.2.1] — 2026-08-16
+## [0.2.2] — 2026-08-16
 
 ### Fixed
-
-- **The fault catalogue used the wrong numbers.** `Realism.FaultCodes`
-  answers a failure with the HomeMatic fault code that matches its
-  cause, and clients classify their retry behaviour by that number —
-  which is the whole reason the feature exists. The numbers were
-  assigned from memory: an unknown device reported -4 and an unknown
-  paramset -2, which is the two swapped, and -3 was given a meaning the
-  specification does not define. A client reads the number, not the
-  message, so a client that correctly treats an unknown device as
-  permanent kept retrying it.
-
-  The numbering is now section 6 of eQ-3's "HomeMatic
-  XML-RPC-Schnittstelle" specification: -2 unknown device or channel,
-  -3 unknown paramset, -4 device address expected, -5 unknown parameter
-  or value, -6 operation not supported by the parameter. The three a
-  read can elicit were additionally confirmed against a live CCU 3.87
-  on both interface processes, which is worth recording because the two
-  word their fault strings differently for the same code: rfd answers
-  "Unknown instance" where the HMIPServer answers "Invalid device".
-
-- **An address nothing answers to reported an unknown paramset.** Four
-  call paths raised the paramset error with an empty paramset name when
-  the *address* had no description at all. The empty name was the tell:
-  there is no paramset involved, the address is the problem. It reports
-  an unknown device now, which is also what a live CCU answers.
 
 - **The object ids went out as JSON numbers.** `Realism.RegaIDs`
   assigns the ids a CCU uses and reports them as `Device.listAllDetail`'s
@@ -66,6 +41,35 @@ is excluded from the stability promise.
   string booleans the CCU's web API takes, so an `"on": "true"` no
   longer falls through to the default and closes the window it was asked
   to open.
+
+## [0.2.1] — 2026-08-16
+
+### Fixed
+
+- **The fault catalogue used the wrong numbers.** `Realism.FaultCodes`
+  answers a failure with the HomeMatic fault code that matches its
+  cause, and clients classify their retry behaviour by that number —
+  which is the whole reason the feature exists. The numbers were
+  assigned from memory: an unknown device reported -4 and an unknown
+  paramset -2, which is the two swapped, and -3 was given a meaning the
+  specification does not define. A client reads the number, not the
+  message, so a client that correctly treats an unknown device as
+  permanent kept retrying it.
+
+  The numbering is now section 6 of eQ-3's "HomeMatic
+  XML-RPC-Schnittstelle" specification: -2 unknown device or channel,
+  -3 unknown paramset, -4 device address expected, -5 unknown parameter
+  or value, -6 operation not supported by the parameter. The three a
+  read can elicit were additionally confirmed against a live CCU 3.87
+  on both interface processes, which is worth recording because the two
+  word their fault strings differently for the same code: rfd answers
+  "Unknown instance" where the HMIPServer answers "Invalid device".
+
+- **An address nothing answers to reported an unknown paramset.** Four
+  call paths raised the paramset error with an empty paramset name when
+  the *address* had no description at all. The empty name was the tell:
+  there is no paramset involved, the address is the problem. It reports
+  an unknown device now, which is also what a live CCU answers.
 
 - **An unknown paramset name came back as an empty map.** `getParamset`
   treats a key that is not MASTER, VALUES or LINK as the peer address of
