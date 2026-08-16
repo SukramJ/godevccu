@@ -377,16 +377,6 @@ func (v *VirtualCCU) Start() error {
 		handlers := jsonrpc.NewHandlers(v.state, v.session, rpcFns, v.rega, v.cfg.XMLRPCPort)
 		handlers.RealisticSchema = v.cfg.Realism.JSONSchema
 		handlers.RegaIDs = v.cfg.Realism.RegaIDs
-		if v.cfg.Realism.RegaIDs {
-			// Assign the ids up front, in catalogue order. They were
-			// assigned lazily, on the first call that reported one, so a
-			// room's channel ids stayed empty until something happened to
-			// have asked for those channels by another route first —
-			// which made every room and function assignment resolve to
-			// nothing on a fresh client, the exact failure the ids exist
-			// to prevent.
-			v.state.RegisterAddresses(deviceAddresses(rpcFns))
-		}
 		handlers.Interfaces = v.interfaceInventory()
 		v.jsonrpc = jsonrpc.NewServer(jsonrpc.Config{
 			Address:  net.JoinHostPort(v.cfg.Host, strconv.Itoa(v.cfg.JSONRPCPort)),
@@ -572,21 +562,4 @@ func (v *VirtualCCU) DiscoveryAddr() net.Addr {
 		return nil
 	}
 	return v.ssdp.LocalAddr()
-}
-
-// deviceAddresses lists every device and channel address the simulator
-// has loaded, parents before their children, so ids follow the
-// catalogue rather than map iteration.
-func deviceAddresses(rpcFns *ccu.RPCFunctions) []string {
-	if rpcFns == nil {
-		return nil
-	}
-	descs := rpcFns.ListDevices()
-	out := make([]string, 0, len(descs))
-	for _, d := range descs {
-		if addr, _ := d["ADDRESS"].(string); addr != "" {
-			out = append(out, addr)
-		}
-	}
-	return out
 }

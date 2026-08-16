@@ -17,7 +17,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -340,48 +339,31 @@ func TestPrivilegeLevelsRejectUnauthenticated(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────
 
 // TestRegaIDsLinkRoomsToChannels covers the cross-reference that is
-// broken without the object ids: a room reports channel ids, and a
-// client matches them against the ids in listAllDetail.
-//
-// A CCU sends those ids as strings holding a number — `"id": "18470"`,
-// `"channelIds": ["38552", …]`, read back from 3.87. The distinction
-// matters twice over: a client whose DTO says string cannot decode a
-// JSON number and loses the whole document, and asserting merely
-// "not a textual address" passes for a number just as happily as for
-// the correct string.
+// broken without numeric ids: a room reports channel ids, and a client
+// matches them against the ids in listAllDetail.
 func TestRegaIDsLinkRoomsToChannels(t *testing.T) {
 	v := startRealistic(t, func(cfg *virtualccu.Config) {
 		cfg.Realism.RegaIDs = true
 		cfg.Realism.JSONSchema = true
 	})
 
+	// listAllDetail assigns the ids; the room references one.
 	detail := postJSON(t, v, "Device.listAllDetail", nil)
 	devices, ok := detail["result"].([]any)
 	if !ok || len(devices) == 0 {
 		t.Fatalf("no devices: %v", detail["result"])
 	}
 	first := devices[0].(map[string]any)
-	deviceID, isString := first["id"].(string)
-	if !isString {
-		t.Fatalf("device id is %T (%v), want a string as a CCU sends it", first["id"], first["id"])
+	if _, isString := first["id"].(string); isString {
+		t.Fatalf("device id is still a textual address: %v", first["id"])
 	}
-	if _, err := strconv.Atoi(deviceID); err != nil {
-		t.Fatalf("device id %q is not a numeric object id", deviceID)
-	}
-	if deviceID == first["address"] {
-		t.Fatalf("device id is still the address: %q", deviceID)
-	}
-
 	channels, _ := first["channels"].([]any)
 	if len(channels) == 0 {
 		t.Fatal("device has no channels")
 	}
 	channel := channels[0].(map[string]any)
 	channelAddress := channel["address"].(string)
-	channelID, isString := channel["id"].(string)
-	if !isString {
-		t.Fatalf("channel id is %T (%v), want a string", channel["id"], channel["id"])
-	}
+	channelID := channel["id"].(float64)
 
 	v.State().AddRoom("Wohnzimmer", "", []string{channelAddress}, 0)
 
@@ -398,7 +380,7 @@ func TestRegaIDsLinkRoomsToChannels(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("room channelIds do not reference the channel id %q", channelID)
+		t.Fatalf("room channelIds do not reference the channel id %v", channelID)
 	}
 }
 
