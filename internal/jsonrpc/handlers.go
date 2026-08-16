@@ -393,8 +393,40 @@ func (h *Handlers) isPresent(_ context.Context, params map[string]any) (any, err
 	return true, nil
 }
 
-func (h *Handlers) getInstallMode(_ context.Context, _ map[string]any) (any, error) { return 0, nil }
-func (h *Handlers) setInstallMode(_ context.Context, _ map[string]any) (any, error) { return true, nil }
+// getInstallMode and setInstallMode run the same pairing automaton the
+// XML-RPC surface does. They answered a constant 0 and a constant true
+// while the automaton existed, so a client that opens its pairing
+// window over JSON-RPC — which is the transport the method belongs to —
+// read a closed window the whole time it was open.
+func (h *Handlers) getInstallMode(_ context.Context, _ map[string]any) (any, error) {
+	if h.RPC == nil {
+		return 0, nil
+	}
+	return h.RPC.GetInstallMode(), nil
+}
+
+func (h *Handlers) setInstallMode(_ context.Context, params map[string]any) (any, error) {
+	if h.RPC == nil {
+		return true, nil
+	}
+	// The CCU spells the duration `time` on this transport and `on` for
+	// the switch; `mode` and `address` are the optional restriction to
+	// a single device.
+	duration, err := intParam(params, "time", "duration")
+	if err != nil {
+		duration = 0
+	}
+	mode, err := intParam(params, "mode")
+	if err != nil {
+		mode = 1
+	}
+	return h.RPC.SetInstallMode(
+		boolParam(params, "on", true),
+		duration,
+		mode,
+		stringParam(params, "address"),
+	), nil
+}
 
 func (h *Handlers) getMasterValue(_ context.Context, _ map[string]any) (any, error) { return "", nil }
 
@@ -483,14 +515,19 @@ func (h *Handlers) channelRecord(address string, d map[string]any) map[string]an
 }
 
 // objectID reports a channel's or device's id. With ReGa ids enabled it
-// is the numeric object id a CCU assigns — a client stores it as the
-// ise_id and cross-references it against the channel ids of rooms and
-// functions, which never match a textual address.
+// is the object id a CCU assigns — a client stores it as the ise_id and
+// cross-references it against the channel ids of rooms and functions,
+// which never match a textual address.
+//
+// The id goes out as a *string*: that is what a CCU sends
+// (`"id": "18470"`, read back from 3.87), and a client whose DTO says
+// string fails to decode the whole document when it arrives as a
+// number — losing every entry, not just the id.
 func (h *Handlers) objectID(address string) any {
 	if !h.RegaIDs || h.State == nil {
 		return address
 	}
-	return h.State.RegisterAddress(address)
+	return strconv.Itoa(h.State.RegisterAddress(address))
 }
 
 // interfaceOf derives the interface name from the device description,
@@ -1105,11 +1142,20 @@ func (h *Handlers) roomListAll(ctx context.Context, params map[string]any) (any,
 // channelIDs converts stored channel addresses into the numeric ReGa
 // ids a client matches against Device.listAllDetail. Without ReGa ids
 // the addresses are reported unchanged.
+// channelIDs maps a room's or function's member addresses onto the ids
+// a client cross-references them by. Like [Handlers.objectID] they are
+// strings on the wire — a live CCU answers
+// `"channelIds": ["38552", "38524"]`.
 func (h *Handlers) channelIDs(addresses []string) any {
 	if !h.RegaIDs || h.State == nil {
 		return addresses
 	}
-	return h.State.ChannelIDsForAddresses(addresses)
+	ids := h.State.ChannelIDsForAddresses(addresses)
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, strconv.Itoa(id))
+	}
+	return out
 }
 
 func (h *Handlers) subsectionGetAll(_ context.Context, _ map[string]any) (any, error) {
@@ -1174,10 +1220,24 @@ func valueKeyParam(params map[string]any) string {
 	return stringParam(params, "value_key")
 }
 
+// boolParam reads a boolean parameter. The CCU's web API takes several
+// of its booleans as the strings "true"/"false" — a client that mirrors
+// that wire shape would otherwise fall through to the default and, on
+// setInstallMode, close a window it was asked to open.
 func boolParam(params map[string]any, key string, def bool) bool {
-	if v, ok := params[key]; ok {
-		if b, ok := v.(bool); ok {
-			return b
+	v, ok := params[key]
+	if !ok {
+		return def
+	}
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		switch strings.ToLower(strings.TrimSpace(b)) {
+		case "true", "1":
+			return true
+		case "false", "0":
+			return false
 		}
 	}
 	return def

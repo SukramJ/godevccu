@@ -9,6 +9,39 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-08-16
+
+### Fixed
+
+- **The object ids went out as JSON numbers.** `Realism.RegaIDs`
+  assigns the ids a CCU uses and reports them as `Device.listAllDetail`'s
+  `id` and as the `channelIds` of rooms and functions. A CCU sends both
+  as *strings* holding a number — `"id": "18470"`, `"channelIds":
+  ["38552", …]`, read back from a live 3.87 — and a client whose DTO
+  says string cannot decode a number, so it loses the whole document
+  rather than one field. The repo's own test asserted only that the id
+  was not a textual address, which a number satisfies as readily as the
+  correct string.
+
+- **Rooms and functions reported no channels at all.** The ids were
+  assigned lazily, by the first call that happened to report one, so a
+  room's `channelIds` stayed empty until something had asked for those
+  channels by another route first. On a fresh client every room and
+  function assignment therefore resolved to nothing — the exact failure
+  the ids exist to prevent. They are assigned at start-up now, in
+  catalogue order; `RegisterAddresses` existed for this and had no
+  caller.
+
+- **Install mode was a constant on JSON-RPC.** The pairing automaton was
+  wired into the XML-RPC surface only, while `Interface.getInstallMode`
+  and `Interface.setInstallMode` — the transport the method belongs to,
+  and the one clients use — returned a hard-coded 0 and true. A client
+  that opened a pairing window read a closed one for as long as it was
+  open. Both handlers run the automaton now, and `boolParam` accepts the
+  string booleans the CCU's web API takes, so an `"on": "true"` no
+  longer falls through to the default and closes the window it was asked
+  to open.
+
 ## [0.2.1] — 2026-08-16
 
 ### Fixed
