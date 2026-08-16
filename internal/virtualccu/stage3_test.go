@@ -199,6 +199,14 @@ func TestFirmwareUpdateWalksItsStates(t *testing.T) {
 
 // TestFaultCodesClassifyFailures pins the codes a client's retry logic
 // reads: an unknown device must not land in the retryable bucket.
+//
+// The numbering is section 6 of eQ-3's XML-RPC specification, and the
+// three codes a read can elicit were confirmed against a live CCU 3.87
+// on both interface processes. This matters more than it looks: the
+// codes were originally assigned from memory, which put an unknown
+// device on -4 and an unknown paramset on -2 — swapped — and invented a
+// -3 the specification does not define. A client reads the number, not
+// the message, so the mistake was invisible in every log.
 func TestFaultCodesClassifyFailures(t *testing.T) {
 	v := startRealistic(t, func(cfg *virtualccu.Config) {
 		cfg.Realism.FaultCodes = true
@@ -207,16 +215,64 @@ func TestFaultCodesClassifyFailures(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := client.Call(ctx, "getDeviceDescription", []xmlrpc.Value{xmlrpc.StringValue("VCU0000404")})
-	if err == nil {
-		t.Fatal("expected a fault for an unknown device")
+	// A real channel for the parameter probes, taken from the fixture
+	// rather than hard-coded: a stale address would make those two
+	// cases report an unknown device and pass for the wrong reason.
+	channel := firstChannel(t, v)
+
+	cases := []struct {
+		name   string
+		method string
+		args   []xmlrpc.Value
+		want   int
+	}{
+		{
+			// Live: "Unknown instance" (rfd) / "Invalid device" (HMIPServer).
+			name:   "unknown device",
+			method: "getDeviceDescription",
+			args:   []xmlrpc.Value{xmlrpc.StringValue("VCU0000404")},
+			want:   ccu.FaultUnknownDevice,
+		},
+		{
+			// An address nothing answers to stays an unknown device even
+			// when the call is about a paramset. It used to report an
+			// unknown paramset with an empty paramset name, which is the
+			// tell: there is no paramset, the address is the problem.
+			name:   "paramset call on an unknown device",
+			method: "getParamset",
+			args:   []xmlrpc.Value{xmlrpc.StringValue("VCU0000404:1"), xmlrpc.StringValue("VALUES")},
+			want:   ccu.FaultUnknownDevice,
+		},
+		{
+			// Live: "Unknown paramset" (rfd) / "Unknown Paramset: <name>".
+			name:   "unknown paramset on a real channel",
+			method: "getParamset",
+			args:   []xmlrpc.Value{xmlrpc.StringValue(channel), xmlrpc.StringValue("NOSUCHSET")},
+			want:   ccu.FaultUnknownParamset,
+		},
+		{
+			// Live: "Unknown parameter" / "Unknown Parameter for value key".
+			name:   "unknown parameter on a real channel",
+			method: "getValue",
+			args:   []xmlrpc.Value{xmlrpc.StringValue(channel), xmlrpc.StringValue("NOSUCHPARAM")},
+			want:   ccu.FaultUnknownParameter,
+		},
 	}
-	fault, ok := err.(*xmlrpc.Fault)
-	if !ok {
-		t.Fatalf("error type = %T, want *xmlrpc.Fault", err)
-	}
-	if fault.Code != ccu.FaultUnknownDevice {
-		t.Errorf("fault code = %d, want %d (unknown device)", fault.Code, ccu.FaultUnknownDevice)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := client.Call(ctx, tc.method, tc.args)
+			if err == nil {
+				t.Fatalf("%s: expected a fault", tc.method)
+			}
+			fault, ok := err.(*xmlrpc.Fault)
+			if !ok {
+				t.Fatalf("error type = %T, want *xmlrpc.Fault", err)
+			}
+			if fault.Code != tc.want {
+				t.Errorf("fault code = %d (%q), want %d — a client classifies its retry "+
+					"behaviour by this number", fault.Code, fault.Message, tc.want)
+			}
+		})
 	}
 }
 
@@ -317,5 +373,19 @@ func anyDevice(t *testing.T, rpc *ccu.RPCFunctions) string {
 		return address
 	}
 	t.Fatal("no devices loaded")
+	return ""
+}
+
+// firstChannel returns an address of a channel the loaded fixture
+// actually carries.
+func firstChannel(t *testing.T, v *virtualccu.VirtualCCU) string {
+	t.Helper()
+	for _, d := range v.RPC().ListDevices() {
+		addr, _ := d["ADDRESS"].(string)
+		if strings.Contains(addr, ":") {
+			return addr
+		}
+	}
+	t.Fatal("fixture carries no channel address")
 	return ""
 }
