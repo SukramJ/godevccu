@@ -9,6 +9,13 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Changed
+
+- README and DOCUMENTATION list `LITE` as the fourth backend mode: the
+  fake openccu-lite box `pkg/litefake` serves, with its topology, its
+  API surfaces, the CLI/library entry points and the CONTRACT.md
+  provenance spelled out.
+
 ## [0.3.0] — 2026-09-29
 
 ### Added

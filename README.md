@@ -12,7 +12,7 @@ It is designed for development and automated testing of Home Assistant and aioho
 - **ReGa script engine** (pattern-based) — compatible with the scripts shipped by `aiohomematic/gohomematic`.
 - **Session authentication** in CCU/OpenCCU format.
 - **397 device types** embedded from pydevccu (via `//go:embed`).
-- **Three backend modes**: `HOMEGEAR`, `CCU`, `OPENCCU`.
+- **Four backend modes**: `HOMEGEAR`, `CCU`, `OPENCCU` and `LITE` — a fake openccu-lite box.
 - **Built-in device behaviour simulators** for HM-Sec-SC-2 and HM-Sen-MDIR-WM55.
 - **Single static binary** — no CGo dependency.
 
@@ -61,15 +61,29 @@ func main() {
 ```bash
 make build
 ./bin/godevccu -mode openccu -xml-rpc-port 2001 -json-rpc-port 8080 -defaults
+./bin/godevccu -mode lite -lite-listen 127.0.0.1:2121   # a fake openccu-lite box, full fleet
 ```
 
 ## Backend modes
 
-| Mode       | XML-RPC | JSON-RPC | Auth | ReGa | Description                       |
-|------------|---------|----------|------|------|-----------------------------------|
-| `HOMEGEAR` | yes     | no       | no   | no   | XML-RPC only, minimal simulation  |
-| `CCU`      | yes     | yes      | yes  | yes  | CCU2/CCU3                         |
-| `OPENCCU`  | yes     | yes      | yes  | yes  | OpenCCU/RaspberryMatic            |
+| Mode       | XML-RPC        | JSON-RPC | Auth      | ReGa | Description                                                  |
+|------------|----------------|----------|-----------|------|--------------------------------------------------------------|
+| `HOMEGEAR` | yes            | no       | no        | no   | XML-RPC only, minimal simulation                             |
+| `CCU`      | yes            | yes      | yes       | yes  | CCU2/CCU3                                                    |
+| `OPENCCU`  | yes            | yes      | yes       | yes  | OpenCCU/RaspberryMatic                                       |
+| `LITE`     | via HTTP proxy | no       | API token | no   | Fake openccu-lite box: occulited HTTP API + SSE event stream |
+
+`LITE` is served by [`pkg/litefake`](pkg/litefake) rather than `Config.Mode`:
+the CLI selects it with `-mode lite`, a program embeds it with
+`litefake.Start`. It composes one simulated interface process per interface
+(the lite topology) and plays occulited on top — token auth with method
+tiers, the XML-RPC proxy with its verbatim `init` refusal, the SSE event
+stream with resume and resync, `/state`, metadata, system and pairing APIs.
+By default the CLI loads **every embedded device type**; `-lite-devices`
+restricts the fleet, and `-lite-tokens`, `-lite-interfaces` and `-lite-tls`
+steer auth, topology and transport. The wire contract it implements is kept
+verbatim in [`pkg/litefake/CONTRACT.md`](pkg/litefake/CONTRACT.md) — that
+contract is pre-1.0, so the package may change in minor releases.
 
 ## Architecture
 

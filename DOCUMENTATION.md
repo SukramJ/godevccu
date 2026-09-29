@@ -11,18 +11,19 @@ CCU/OpenCCU simulation with the JSON-RPC web API.
 
 1. [Realism (opt-in)](#realism-opt-in)
 2. [Backend modes](#backend-modes)
-3. [VirtualCCU](#virtualccu)
-4. [State manager](#state-manager)
-5. [Session management](#session-management)
-6. [XML-RPC layer](#xml-rpc-layer)
-7. [BIN-RPC layer (CUxD)](#bin-rpc-layer-cuxd)
-8. [JSON-RPC layer](#json-rpc-layer)
-9. [ReGa script engine](#rega-script-engine)
-10. [Device definitions](#device-definitions)
-11. [Device behaviour simulators](#device-behaviour-simulators)
-12. [Configuration](#configuration)
-13. [Persistence](#persistence)
-14. [Example workflows](#example-workflows)
+3. [Fake openccu-lite box (pkg/litefake)](#fake-openccu-lite-box-pkglitefake)
+4. [VirtualCCU](#virtualccu)
+5. [State manager](#state-manager)
+6. [Session management](#session-management)
+7. [XML-RPC layer](#xml-rpc-layer)
+8. [BIN-RPC layer (CUxD)](#bin-rpc-layer-cuxd)
+9. [JSON-RPC layer](#json-rpc-layer)
+10. [ReGa script engine](#rega-script-engine)
+11. [Device definitions](#device-definitions)
+12. [Device behaviour simulators](#device-behaviour-simulators)
+13. [Configuration](#configuration)
+14. [Persistence](#persistence)
+15. [Example workflows](#example-workflows)
 
 ---
 
@@ -102,14 +103,52 @@ answer 302 and `CCU.getHttpsRedirectEnabled` report true.
 | `HOMEGEAR`| yes     | no       | no             | no   | Slim mode, XML-RPC only. The version string becomes `godevccu-<VERSION>`. |
 | `CCU`     | yes     | yes      | yes            | yes  | Classic CCU2/CCU3 simulation. |
 | `OPENCCU` | yes     | yes      | yes            | yes  | OpenCCU/RaspberryMatic. Identical behaviour to `CCU`, but `Product=OpenCCU`. |
+| `LITE`    | via HTTP proxy | no | API token     | no   | Fake openccu-lite box; see [pkg/litefake](#fake-openccu-lite-box-pkglitefake). |
 
-The mode is selected through `Config.Mode`
+The first three modes are selected through `Config.Mode`
 (`godevccu.BackendModeHomegear`, `BackendModeCCU`,
-`BackendModeOpenCCU`).
+`BackendModeOpenCCU`); `LITE` is selected on the CLI with `-mode lite`
+and in a program with `litefake.Start`.
 
 In `CCU`/`OPENCCU` mode `getVersion` returns the real CCU firmware
 version `3.87.1.20250130`; in Homegear mode it returns the `godevccu`
 version string.
+
+---
+
+## Fake openccu-lite box (pkg/litefake)
+
+`pkg/litefake` simulates a whole **openccu-lite** box the way the other
+modes simulate a CCU. On a real box the daemon `occulited` is the only
+XML-RPC client of the interface processes and republishes their events
+on one authenticated stream; `litefake` reproduces that topology: it
+starts one simulated interface process per interface (each with its own
+device partition), subscribes to them itself, and serves the LAN-side
+surfaces a client of the box sees:
+
+- `/api/rpc/v1/interfaces`, `/api/rpc/v1/xmlrpc/{interface}` — the
+  XML-RPC proxy with token auth, the per-method scope tiers and the
+  verbatim `init` refusal;
+- `/api/rpc/v1/events` — the SSE event stream with resume, filters,
+  resync and stream limits — and `/api/rpc/v1/state`;
+- `/api/auth/v1` (sessions, client pairing), `/api/meta/v1` (metadata
+  store with change stream), `/api/system/v1` (health, backup, reboot),
+  UPnP description and the HTML shell catch-all.
+
+Entry points: `litefake.Start(ctx, litefake.Options{...})` in a
+program, `-mode lite` on the CLI. `Options.Devices` nil loads a small
+three-device default fleet, a non-nil empty slice loads **every
+embedded device type** (the CLI default); `Options.ListenAddr` binds a
+fixed address instead of the loopback-ephemeral test default. Knobs
+steer readiness, interface outages, process restarts, dropped streams,
+forced overflow and the token table from a test.
+
+The wire contract the package is implemented from is kept verbatim in
+[`pkg/litefake/CONTRACT.md`](pkg/litefake/CONTRACT.md); it is our own
+condensation of occulited's documented HTTP API — occulited is
+GPL-3.0, and no source, fixture or algorithm is copied or translated
+from it. That contract is pre-1.0, so the package may change in minor
+releases.
 
 ---
 
