@@ -9,6 +9,25 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added
+
+- **`pkg/litefake` — a fake openccu-lite box.** occulited's HTTP API
+  (token auth with method tiers, the XML-RPC proxy with its verbatim
+  init refusal, the SSE event stream with resume/filters/resync and
+  stream limits, `/state`, metadata, system, pairing, UPnP), composed
+  on top of per-interface simulator listeners the way occulited sits on
+  a real box's interface processes. Moved here from OpenCCU-Loom's test
+  harness (`tests/harness/litefake`) so any client can use it; written
+  from the condensed wire contract in `pkg/litefake/CONTRACT.md`. That
+  contract is pre-1.0, so the package may change in minor releases.
+- **`-mode lite` on the CLI**: serve the fake box standalone on a fixed
+  address (`-lite-listen`, default `:2121`), loading **every embedded
+  device type** by default; `-lite-devices` restricts the fleet,
+  `-lite-tokens`, `-lite-interfaces` and `-lite-tls` steer auth,
+  topology and transport.
+- **`litefake.Options.ListenAddr`**: bind the box API to a fixed
+  address; empty keeps the loopback-ephemeral in-process test default.
+
 ## [0.2.2] — 2026-08-16
 
 ### Fixed

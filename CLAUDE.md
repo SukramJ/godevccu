@@ -18,6 +18,16 @@ Goals:
    BIN-RPC and no CUxD, so that transport models real CUxD instead —
    including its `system.multicall` callback envelope. Keep it opt-in
    (`Config.BINRPCPort`) so a default run stays pydevccu-shaped.
+   `pkg/litefake` is the second deliberate exception: a fake
+   openccu-lite box (occulited's HTTP API — token auth, XML-RPC proxy
+   with init refusal and method tiers, SSE event stream, metadata,
+   system, pairing) composed on top of per-interface simulator
+   listeners. pydevccu has no counterpart. It is written from the
+   condensed wire contract in `pkg/litefake/CONTRACT.md` and from
+   nothing else — occulited is GPL-3.0, so no source, fixture or
+   algorithm is ever copied or translated from it. Keep it opt-in too
+   (`litefake.Start`, CLI `-mode lite`): a default run stays
+   pydevccu-shaped.
 2. **Single static binary** (`CGO_ENABLED=0`). No platform-specific
    build steps.
 3. **Embedded device definitions** (via `//go:embed`) — no runtime
@@ -25,10 +35,12 @@ Goals:
 
 ## Hard rules (non-negotiable)
 
-- **License header (MIT)** in every new source file:
+- **License header (MIT)** in every new source file, naming the
+  copyright holder (existing `godevccu authors` headers stay as they
+  are):
   ```
   // SPDX-License-Identifier: MIT
-  // Copyright (C) 2026 godevccu authors.
+  // Copyright (C) 2026 SukramJ.
   ```
 - **No CGo dependencies** (`CGO_ENABLED=0` is set globally).
 - **Method names** at the XML-RPC layer stay **camelCase** (HomeMatic
@@ -37,8 +49,10 @@ Goals:
   upper case.
 - **Device descriptions** must not be modified directly in the repo —
   they are imported via `script/copy_data.sh` from `pydevccu/pydevccu/`.
-- **Public API** lives in `pkg/godevccu/`. Everything else lives under
-  `internal/` and is excluded from the API stability promise.
+- **Public API** lives in `pkg/godevccu/` and `pkg/litefake/`.
+  Everything else lives under `internal/` and is excluded from the API
+  stability promise. `pkg/litefake` mirrors a pre-1.0 wire contract
+  (`pkg/litefake/CONTRACT.md`) and may change in minor releases.
 
 ## Build & test
 
