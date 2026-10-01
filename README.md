@@ -62,6 +62,7 @@ func main() {
 ```bash
 make build
 ./bin/godevccu -mode openccu -xml-rpc-port 2001 -json-rpc-port 8080 -defaults
+./bin/godevccu -mode homegear -xml-rpc-port 2001 -devices HmIP-BWTH,HmIP-eTRV-2   # two device types only
 ./bin/godevccu -mode lite -lite-listen 127.0.0.1:2121   # a fake openccu-lite box, full fleet
 ```
 

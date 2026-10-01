@@ -57,6 +57,7 @@ func run() error {
 	interfaces := flag.String("interfaces", "", "separate interface listeners, e.g. BidCos-RF=2001,HmIP-RF=2010 (port 0: the system picks one)")
 	controlPort := flag.Int("control-port", -1, "serve the scenario API over HTTP on 127.0.0.1 at this port (0: the system picks one; default off)")
 	portsJSON := flag.String("ports-json", "", "once every server listens, write the bound ports as JSON to this file, or as one line to stdout with \"-\"")
+	devices := flag.String("devices", "", "comma-separated device types to load (empty: every embedded type); lite mode uses -lite-devices")
 	flag.Parse()
 
 	if *showVersion {
@@ -93,6 +94,9 @@ func run() error {
 	cfg.Persistence = *persistence
 	cfg.SetupDefaults = *defaults
 	cfg.EnableLogic = *logic
+	if *devices != "" {
+		cfg.Devices = splitList(*devices)
+	}
 	cfg.Logger = logger
 	if *realism {
 		cfg.Realism = godevccu.RealismCCU()
