@@ -9,6 +9,11 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added
+
+- CLI: `-devices` restricts the loaded device types outside lite mode
+  (the library already had `Config.Devices`).
+
 ## [0.5.0] — 2026-10-01
 
 Scenario API and interface-process behaviours modelled on
