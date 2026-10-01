@@ -37,7 +37,8 @@ Use this appendix as the contract; do not consult occulited source.
 ### A.2 Authentication, tokens, scopes
 
 - Credentials (first valid wins): cookie session; `Authorization: Bearer <x>` (API token
-  `olt_<32 lowercase hex>` or a 26-char base32 session id); **Basic auth whose password is an API
+  `olt_<32 lowercase hex>` or a session id of 26 characters of uppercase `A-Z2-7` *(doc: openccu-lite
+  docs/PORTING-PROMPT.md)*); **Basic auth whose password is an API
   token** (user name ignored); `?sid=` (refused on lite-rpc: `400 bad-request "credentials are not
   accepted in the query string here: use the Authorization header"`). The 10-char legacy alias is never
   accepted.
@@ -54,6 +55,20 @@ Use this appendix as the contract; do not consult occulited source.
   `user` (`"token:<name>"` for a token), `scopes` (the **stored** list, implied scopes **not**
   expanded), `must_change_password`; accounts add `role`, `level`, `account_id`, `sid`, `method`. Auth
   mode `off`: fixed object with `auth_off: true`.
+  - Auth mode `off` (`auth.mode: off` in `occulited.json`, takes effect at the next start of
+    occulited): there is no login; every caller — any credential or none — is the box's **one
+    anonymous administrator session** that occulited keeps alive, on the API, the addon pages and
+    through lighttpd's gate. `GET /api/auth/v1/state` answers that session's object with
+    `auth_off: true` *(doc: openccu-lite docs/security.md, "Authentication off")*; `authenticated`
+    is therefore `true`. An administrator session has role `admin` *(doc: openccu-lite
+    docs/security.md, "a session with role `admin`")* and level `administer` (vocabulary above).
+  - The box also **sets that session's cookie** on the state answer, so the gate's session file
+    exists *(doc: same section)*. litefake models the body only, no cookie.
+  - **Not fixed by the documentation:** the identifier strings of that session — `user`,
+    `account_id`, `sid` — nor its `scopes`, `method` or `must_change_password` value. litefake
+    fills them with its own placeholders (overridable; `must_change_password: false`); a test must
+    not treat them as the real box's values. Only the `auth_off: true` marker, `authenticated:
+    true` and the administrator role/level are contract.
 - `POST /api/auth/v1/login {username, password}` (open) → `{sid, user, role, level, account_id,
   must_change_password}`; `level` ∈ `read`, `operate`, `configure`, `administer`.
   `POST /api/auth/v1/logout` needs the session (`Authorization: Bearer <sid>`).

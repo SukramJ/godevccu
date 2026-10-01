@@ -209,10 +209,82 @@ type authStateSession struct {
 	Method    string `json:"method"`
 }
 
+// authStateOff is the /api/auth/v1/state answer in auth mode off: the
+// anonymous administrator session's object plus the auth_off marker. It
+// is a separate type so the normal-mode answers never carry the member.
+type authStateOff struct {
+	authStateSession
+	AuthOff bool `json:"auth_off"`
+}
+
+// The administrator role and level the contract fixes for the auth-off
+// session (CONTRACT.md §A.2).
+const (
+	authOffRole  = "admin"
+	authOffLevel = "administer"
+)
+
+// DefaultAuthOffSID is the session id auth mode off reports unless
+// [Options.AuthOffSID] names another. It is a litefake placeholder in the
+// shape of a session id (26 characters of uppercase A-Z2-7): the contract does not fix
+// the real box's value, so a test must not treat it as one.
+const DefaultAuthOffSID = "LITEFAKEAUTHOFFSESSION2222"
+
+// authOffMethod is the login method auth mode off reports. The contract
+// does not fix it; it is a litefake placeholder.
+const authOffMethod = "password"
+
+// DefaultAuthOffAccount is the placeholder identity of the anonymous
+// administrator session auth mode off reports unless
+// [Options.AuthOffAccount] names another. The contract fixes only the
+// auth_off marker and the administrator role and level (CONTRACT.md
+// §A.2), not the user, account id or scopes; these strings are
+// litefake's own and must not be treated as the real box's values.
+func DefaultAuthOffAccount() Account {
+	return Account{
+		Username:  "litefake-anonymous",
+		Role:      authOffRole,
+		Level:     authOffLevel,
+		AccountID: "litefake-auth-off",
+		Scopes:    []string{scopeAll},
+	}
+}
+
+// authOffState builds the fixed auth-off answer from the configured
+// placeholder identity; role, level and must_change_password are the
+// contract's, whatever the account says.
+func (f *Fake) authOffState() authStateOff {
+	a := f.opts.AuthOffAccount
+	return authStateOff{
+		authStateSession: authStateSession{
+			authStateToken: authStateToken{
+				Authenticated: true,
+				User:          a.Username,
+				Scopes:        append([]string{}, a.Scopes...),
+			},
+			Role:      authOffRole,
+			Level:     authOffLevel,
+			AccountID: a.AccountID,
+			SID:       f.opts.AuthOffSID,
+			Method:    authOffMethod,
+		},
+		AuthOff: true,
+	}
+}
+
 // handleAuthState answers GET /api/auth/v1/state. It is open; with a
 // credential it reports the scopes exactly as stored, implications not
-// expanded, so a client has to expand them itself.
+// expanded, so a client has to expand them itself. In auth mode off it
+// answers every request, whatever credential it carries, with the fixed
+// anonymous administrator session object.
 func (f *Fake) handleAuthState(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	off := f.authOff
+	f.mu.Unlock()
+	if off {
+		writeJSON(w, http.StatusOK, f.authOffState())
+		return
+	}
 	secret := credential(r)
 	who, ok := f.resolve(secret)
 	if !ok {
@@ -259,11 +331,12 @@ type session struct {
 	account Account
 }
 
-// newSessionID returns a 26-character base32 session id.
+// newSessionID returns a session id of 26 characters of uppercase
+// A-Z2-7, the standard base32 alphabet without padding (CONTRACT.md §A.2).
 func newSessionID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
-	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b[:]))
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b[:])
 }
 
 // loginRequest is the body of POST /api/auth/v1/login.

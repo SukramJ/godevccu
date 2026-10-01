@@ -142,6 +142,19 @@ func (f *Fake) SetAccounts(accounts []Account) {
 	f.mu.Unlock()
 }
 
+// SetAuthOff switches auth mode off on or off. While on,
+// GET /api/auth/v1/state answers every request — no credential, an
+// unknown one, a valid token or session alike — with the fixed anonymous
+// administrator session object carrying auth_off true (CONTRACT.md
+// §A.2). It models the state answer only; route authorization is
+// unchanged, so every other route still checks credentials and scopes.
+// Switching it off restores the normal answers.
+func (f *Fake) SetAuthOff(on bool) {
+	f.mu.Lock()
+	f.authOff = on
+	f.mu.Unlock()
+}
+
 // SetMetaHeartbeatInterval changes the change-stream heartbeat period
 // for streams opened afterwards.
 func (f *Fake) SetMetaHeartbeatInterval(d time.Duration) {

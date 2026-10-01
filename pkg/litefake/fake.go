@@ -112,6 +112,17 @@ type Options struct {
 	MetaLog   int
 	// Accounts are the user accounts that can log in.
 	Accounts []Account
+	// AuthOff starts the box in auth mode off (see [Fake.SetAuthOff]).
+	AuthOff bool
+	// AuthOffAccount supplies the identifier strings (user, account id,
+	// scopes) of the anonymous administrator session auth mode off
+	// reports. The contract does not fix them; an empty Username means
+	// [DefaultAuthOffAccount]. Role and level are always the
+	// administrator's, whatever this account says.
+	AuthOffAccount Account
+	// AuthOffSID is the session id auth mode off reports; empty means
+	// [DefaultAuthOffSID]. A litefake placeholder, not the box's value.
+	AuthOffSID string
 	// PairingDisabled switches client pairing off (403 pairing-off).
 	PairingDisabled bool
 	// PairingLifetime is how long a request stays pending, PairingKeep
@@ -177,6 +188,7 @@ type Fake struct {
 	tokens        map[string]tokenEntry
 	accounts      map[string]Account
 	sessions      map[string]*session
+	authOff       bool
 	heartbeat     time.Duration
 	metaHeartbeat time.Duration
 	ifaces        map[string]*ifaceState
@@ -234,6 +246,7 @@ func Start(ctx context.Context, opts Options) (*Fake, error) {
 	f.sessions = map[string]*session{}
 	f.setTokens(opts.Tokens)
 	f.SetAccounts(opts.Accounts)
+	f.authOff = opts.AuthOff
 	for _, name := range opts.Interfaces {
 		addr, ok := v.InterfaceAddr(name).(*net.TCPAddr)
 		if !ok || addr == nil {
@@ -338,6 +351,13 @@ func withDefaults(o Options) Options {
 	}
 	if o.Logger == nil {
 		o.Logger = slog.New(slog.DiscardHandler)
+	}
+	if o.AuthOffAccount.Username == "" {
+		o.AuthOffAccount = DefaultAuthOffAccount()
+	}
+	o.AuthOffAccount.Scopes = append([]string{}, o.AuthOffAccount.Scopes...)
+	if o.AuthOffSID == "" {
+		o.AuthOffSID = DefaultAuthOffSID
 	}
 	return o
 }
