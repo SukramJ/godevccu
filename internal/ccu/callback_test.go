@@ -74,6 +74,14 @@ func (rr *recordingRemote) containing(fragments ...string) bool {
 	return false
 }
 
+// receivedEvent reports whether the remote got an event call for
+// valueKey. It matches the method name and the value key as an XML-RPC
+// string, so a newDevices push whose descriptions mention a parameter
+// like FIRMWARE_UPDATE_STATE does not count as an event.
+func (rr *recordingRemote) receivedEvent(valueKey string) bool {
+	return rr.containing("<methodName>event</methodName>", "<string>"+valueKey+"</string>")
+}
+
 // TestPingFiresPongEvent covers the handshake a client uses to keep its
 // connection state healthy: ping(callerID) must be answered with an
 // event(interfaceID, "CENTRAL", "PONG", callerID) carrying the caller id

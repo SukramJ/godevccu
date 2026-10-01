@@ -239,11 +239,29 @@ func TestInitSemanticsKeepsClientsSharingAnInterfaceID(t *testing.T) {
 			rpc.Init(first.srv.URL, "shared")
 			rpc.Init(second.srv.URL, "shared")
 			rpc.FireEvent("shared", "VCU0000001:1", "STATE", true)
-			eventually(t, "event at the second client", func() bool { return second.containing("STATE") })
-			if got := first.containing("STATE"); got != tc.bothGet {
+			eventually(t, "event at the second client", func() bool { return second.receivedEvent("STATE") })
+			if got := first.receivedEvent("STATE"); got != tc.bothGet {
 				t.Fatalf("first client got the event = %v, want %v", got, tc.bothGet)
 			}
 		})
+	}
+}
+
+// A replaced client may already have received its newDevices push, whose
+// device descriptions mention parameters such as FIRMWARE_UPDATE_STATE.
+// That push must not be mistaken for an event: the replaced client gets
+// no event call.
+func TestInitReplacedClientGetsNoEventAfterDevicePush(t *testing.T) {
+	rpc := newRPC(t)
+	first := newRecordingRemote(t, okResponse)
+	second := newRecordingRemote(t, okResponse)
+	rpc.Init(first.srv.URL, "shared")
+	eventually(t, "newDevices at the first client", func() bool { return first.containing("newDevices") })
+	rpc.Init(second.srv.URL, "shared")
+	rpc.FireEvent("shared", "VCU0000001:1", "STATE", true)
+	eventually(t, "event at the second client", func() bool { return second.receivedEvent("STATE") })
+	if first.receivedEvent("STATE") {
+		t.Fatal("replaced client got the event")
 	}
 }
 
