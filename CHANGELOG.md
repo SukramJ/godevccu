@@ -9,6 +9,20 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added
+
+- `pkg/litefake` models the box's auth mode off (CONTRACT.md §A.2,
+  expanded from the openccu-lite security documentation):
+  `Options.AuthOff` and the knob `Fake.SetAuthOff` make
+  `GET /api/auth/v1/state` answer every caller — any credential or
+  none — with the fixed anonymous administrator session object
+  carrying `auth_off: true`. Its identifier strings come from
+  `Options.AuthOffAccount` / `Options.AuthOffSID` (defaults
+  `DefaultAuthOffAccount`, `DefaultAuthOffSID`): litefake placeholders,
+  since the contract does not fix the real box's values. Only the state
+  answer is modelled; route authorization is unchanged, and the
+  normal-mode answers carry no `auth_off` member.
+
 ### Changed
 
 - README and DOCUMENTATION list `LITE` as the fourth backend mode: the
