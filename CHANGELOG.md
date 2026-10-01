@@ -9,6 +9,8 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-01
+
 ### Added
 
 - `pkg/litefake` models the box's auth mode off (CONTRACT.md §A.2,
@@ -22,6 +24,14 @@ is excluded from the stability promise.
   since the contract does not fix the real box's values. Only the state
   answer is modelled; route authorization is unchanged, and the
   normal-mode answers carry no `auth_off` member.
+
+### Fixed
+
+- `pkg/litefake` mints session ids in the box's shape — 26 characters
+  of uppercase `A-Z2-7` (CONTRACT.md §A.2, per the openccu-lite
+  documentation). They were lowercased before, so a downstream
+  shape check refused every litefake-minted id; caught by
+  OpenCCU-Loom's box-shell SSO conformance test on its first run.
 
 ### Changed
 
@@ -623,7 +633,8 @@ Initial release. A standalone Go port of
   and `3.87.1.20250130` in CCU/OpenCCU mode — identical to upstream
   pydevccu so clients that branch on the prefix keep working.
 
-[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/SukramJ/godevccu/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/SukramJ/godevccu/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/SukramJ/godevccu/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/SukramJ/godevccu/compare/v0.2.0...v0.2.1
