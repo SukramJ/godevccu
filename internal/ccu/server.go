@@ -49,6 +49,9 @@ type Server struct {
 	// resumeAddr the address it rebinds; see restart.go.
 	suspended  bool
 	resumeAddr string
+	// served is closed once the plaintext listener's Serve returned —
+	// on Windows the port is only free after that; see restart.go.
+	served chan struct{}
 
 	// ready models the CCU boot state. A booting CCU refuses every
 	// remote API port with 503 — not just the web API — so a client
@@ -203,7 +206,10 @@ func (s *Server) listenLocked(addr string) error {
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 	s.httpSrv = srv
+	served := make(chan struct{})
+	s.served = served
 	go func() {
+		defer close(served)
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.logger.Error("ccu: serve failed", "err", err)
 		}

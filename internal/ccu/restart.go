@@ -6,6 +6,7 @@ package ccu
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Interface processes that stop, restart or lose their clients.
@@ -45,9 +46,11 @@ func (s *Server) Suspend() error {
 	s.suspended = true
 	s.resumeAddr = s.listener.Addr().String()
 	srv := s.httpSrv
+	served := s.served
 	s.httpSrv = nil
 	s.listener = nil
 	tlsSrv := s.tls.srv
+	tlsServed := s.tls.served
 	s.tls.srv = nil
 	s.tls.listener = nil
 	s.mu.Unlock()
@@ -57,10 +60,12 @@ func (s *Server) Suspend() error {
 	if err := srv.Close(); err != nil {
 		firstErr = err
 	}
+	awaitServed(served)
 	if tlsSrv != nil {
 		if err := tlsSrv.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
+		awaitServed(tlsServed)
 	}
 	if addr := s.BINRPCLocalAddr(); addr != nil {
 		s.binrpc.mu.Lock()
@@ -89,12 +94,12 @@ func (s *Server) Resume(forgetClients bool) error {
 		s.mu.Unlock()
 		return nil
 	}
-	if err := s.listenLocked(s.resumeAddr); err != nil {
+	if err := rebind(func() error { return s.listenLocked(s.resumeAddr) }); err != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("ccu: resume: %w", err)
 	}
 	if s.tls.addr != "" {
-		if err := s.startTLSLocked(s.tls.addr, s.tls.certPEM, s.tls.keyPEM); err != nil {
+		if err := rebind(func() error { return s.startTLSLocked(s.tls.addr, s.tls.certPEM, s.tls.keyPEM) }); err != nil {
 			s.mu.Unlock()
 			return fmt.Errorf("ccu: resume tls: %w", err)
 		}
@@ -107,7 +112,7 @@ func (s *Server) Resume(forgetClients bool) error {
 	s.binrpc.resumeAddr = ""
 	s.binrpc.mu.Unlock()
 	if binAddr != "" {
-		if err := s.StartBINRPC(binAddr); err != nil {
+		if err := rebind(func() error { return s.StartBINRPC(binAddr) }); err != nil {
 			return fmt.Errorf("ccu: resume: %w", err)
 		}
 	}
@@ -134,4 +139,42 @@ func (s *Server) DropConnections() error {
 		return err
 	}
 	return s.Resume(true)
+}
+
+// serveExitTimeout bounds the wait for a closed listener's Serve loop.
+const serveExitTimeout = 2 * time.Second
+
+// awaitServed waits until a Serve loop has returned. On the Windows CI
+// runner a suspended port still accepted a connection right after
+// Close and refused an immediate rebind (WSAEADDRINUSE); waiting for
+// the pending accept to finish is the mitigation, rebind's retries the
+// backstop.
+func awaitServed(served <-chan struct{}) {
+	if served == nil {
+		return
+	}
+	select {
+	case <-served:
+	case <-time.After(serveExitTimeout):
+	}
+}
+
+// rebindAttempts and rebindBackoff bound the retries of a rebind: a
+// port can stay busy for a moment after its listener closed (Windows
+// reports WSAEADDRINUSE until then).
+const (
+	rebindAttempts = 20
+	rebindBackoff  = 50 * time.Millisecond
+)
+
+// rebind runs listen until it succeeds or the attempts are used up.
+func rebind(listen func() error) error {
+	var err error
+	for range rebindAttempts {
+		if err = listen(); err == nil {
+			return nil
+		}
+		time.Sleep(rebindBackoff)
+	}
+	return err
 }

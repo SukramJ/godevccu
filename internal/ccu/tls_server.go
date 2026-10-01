@@ -23,6 +23,7 @@ type tlsState struct {
 	addr    string
 	certPEM []byte
 	keyPEM  []byte
+	served  chan struct{}
 }
 
 // StartTLS binds an HTTPS listener on addr serving the same XML-RPC
@@ -64,7 +65,10 @@ func (s *Server) startTLSLocked(addr string, certPEM, keyPEM []byte) error {
 	s.tls.listener = ln
 	s.tls.addr = ln.Addr().String()
 	s.tls.certPEM, s.tls.keyPEM = certPEM, keyPEM
+	served := make(chan struct{})
+	s.tls.served = served
 	go func() {
+		defer close(served)
 		if serveErr := srv.ServeTLS(ln, "", ""); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			s.logger.Error("ccu: tls serve failed", "err", serveErr)
 		}
