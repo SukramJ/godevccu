@@ -366,7 +366,8 @@ func (f *Fake) handleLogin(w http.ResponseWriter, r *http.Request) {
 	acct, ok := f.accounts[req.Username]
 	f.mu.Unlock()
 	if !ok || acct.Password != req.Password {
-		writeError(w, http.StatusUnauthorized, "unauthenticated", "invalid username or password")
+		// One answer for an unknown user and a wrong password alike (CONTRACT §A.2).
+		writeError(w, http.StatusUnauthorized, "invalid-credentials", "invalid credentials")
 		return
 	}
 	sid := newSessionID()

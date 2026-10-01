@@ -9,6 +9,16 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Fixed
+
+- **litefake: a refused login answers like the box.** `POST /api/auth/v1/login`
+  with an unknown user or a wrong password now answers
+  `401 {"error":"invalid-credentials","message":"invalid credentials"}` — the
+  answer observed on a real openccu-lite box (1.0.0-dev.32), identical for both
+  cases. litefake answered the generic route error `unauthenticated`, so a client
+  could not be tested against telling a refused login apart from a missing
+  session. The contract records it (CONTRACT §A.2).
+
 ## [0.6.0] — 2026-10-01
 
 ### Added

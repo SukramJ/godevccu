@@ -71,6 +71,9 @@ Use this appendix as the contract; do not consult occulited source.
     true` and the administrator role/level are contract.
 - `POST /api/auth/v1/login {username, password}` (open) → `{sid, user, role, level, account_id,
   must_change_password}`; `level` ∈ `read`, `operate`, `configure`, `administer`.
+  A refused login answers `401 {"error":"invalid-credentials","message":"invalid credentials"}` —
+  byte-identical for an unknown user and for a wrong password, and distinct from the route answer
+  `unauthenticated` below *(observed: openccu-lite 1.0.0-dev.32, occulited 565529569)*.
   `POST /api/auth/v1/logout` needs the session (`Authorization: Bearer <sid>`).
 - `401 {"error":"unauthenticated","message":"login required"}`;
   `403 {"error":"forbidden","message":"the scope <s> is required","scope":"<s>"}` (the route's first

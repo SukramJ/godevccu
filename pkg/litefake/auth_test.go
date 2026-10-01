@@ -76,8 +76,14 @@ func TestFakeLoginSessionAndLogout(t *testing.T) {
 		Username: "admin", Password: "secret", Role: "admin", Level: "administer",
 		AccountID: "1", Scopes: []string{"rpc:read"},
 	}}})
-	if resp, raw := send(t, f, http.MethodPost, "/api/auth/v1/login", "", `{"username":"admin","password":"wrong"}`); resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("wrong password: %d %s", resp.StatusCode, raw)
+	// A refused login answers its own error code, distinct from the generic
+	// unauthenticated route answer — and the same for an unknown user as for
+	// a wrong password, so the answer does not reveal which accounts exist.
+	for _, creds := range []string{`{"username":"admin","password":"wrong"}`, `{"username":"nobody","password":"x"}`} {
+		resp, raw := send(t, f, http.MethodPost, "/api/auth/v1/login", "", creds)
+		if resp.StatusCode != http.StatusUnauthorized || string(raw) != `{"error":"invalid-credentials","message":"invalid credentials"}` {
+			t.Errorf("refused login %s: %d %s", creds, resp.StatusCode, raw)
+		}
 	}
 	resp, raw := send(t, f, http.MethodPost, "/api/auth/v1/login", "", `{"username":"admin","password":"secret"}`)
 	login := decode[struct {
