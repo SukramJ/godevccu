@@ -8,7 +8,7 @@
 package hmconst
 
 // Version of the godevccu package itself.
-const Version = "0.4.0"
+const Version = "0.5.0"
 
 // PydevccuVersion is the upstream pydevccu version godevccu emulates
 // for wire-level compatibility. The string is returned by getVersion
