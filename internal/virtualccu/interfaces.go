@@ -160,6 +160,20 @@ func (v *VirtualCCU) interfaceInventory() []jsonrpc.InterfaceInfo {
 
 // applyRealism switches on the opted-in behaviours of an RPC instance.
 func (v *VirtualCCU) applyRealism(rpcFns *ccu.RPCFunctions) {
+	// Before PersistInit: restored registrations are keyed by url
+	// under init semantics.
+	if v.cfg.Realism.InitSemantics {
+		rpcFns.EnableInitSemantics()
+	}
+	if v.cfg.Realism.MasterModel {
+		rpcFns.EnableMasterModel()
+	}
+	if v.cfg.Realism.InterfaceQuirks {
+		rpcFns.EnableQuirks()
+	}
+	if v.cfg.Realism.ServiceMessagesFault {
+		rpcFns.EnableServiceMessagesFault()
+	}
 	if v.cfg.Realism.Reachability {
 		rpcFns.EnableReachability(0)
 	}

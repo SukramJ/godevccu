@@ -42,3 +42,33 @@ func newRemote(url string) remoteCaller {
 	}
 	return xmlrpc.NewClient(url)
 }
+
+// newRemote builds the callback client for url and records every call
+// it makes in the callback log; see callbacklog.go.
+func (r *RPCFunctions) newRemote(url string) remoteCaller {
+	return &loggedRemote{inner: newRemote(url), log: r.callbackLog, interfaceID: r.interfaceID}
+}
+
+// registration is one logic layer registered through init: the
+// interface id it is called back with, and the client that reaches it.
+type registration struct {
+	interfaceID string
+	client      remoteCaller
+}
+
+// remoteEntry is a registration together with the key it is stored
+// under — the interface id by default, the url with init semantics.
+type remoteEntry struct {
+	key string
+	registration
+}
+
+// snapshotRemotesLocked copies the registrations so callbacks can be
+// made without the lock. The caller must hold the lock.
+func (r *RPCFunctions) snapshotRemotesLocked() []remoteEntry {
+	out := make([]remoteEntry, 0, len(r.remotes))
+	for key, reg := range r.remotes {
+		out = append(out, remoteEntry{key: key, registration: reg})
+	}
+	return out
+}

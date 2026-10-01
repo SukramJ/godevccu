@@ -42,6 +42,14 @@ type Server struct {
 	// generic -1; see faults.go.
 	faultCodes bool
 
+	// faults holds the injected misbehaviour; see faultinject.go.
+	faults faultInjector
+
+	// suspended is true while the interface process is stopped and
+	// resumeAddr the address it rebinds; see restart.go.
+	suspended  bool
+	resumeAddr string
+
 	// ready models the CCU boot state. A booting CCU refuses every
 	// remote API port with 503 — not just the web API — so a client
 	// that probes XML-RPC during startup sees the same "still coming
@@ -85,6 +93,7 @@ func NewServer(cfg ServerConfig) *Server {
 		logicCfg:    cfg.LogicConfig,
 	}
 	s.ready.Store(true)
+	handler.Intercept = s.intercept
 	s.registerMethods()
 	return s
 }
@@ -116,8 +125,11 @@ func (s *Server) Addr() string { return s.addr }
 // RPC returns the underlying RPCFunctions.
 func (s *Server) RPC() *RPCFunctions { return s.rpc }
 
-// LocalAddr returns the listener address (only valid after Start).
+// LocalAddr returns the listener address (only valid after Start, and
+// nil while the interface is stopped).
 func (s *Server) LocalAddr() net.Addr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.listener == nil {
 		return nil
 	}
@@ -131,23 +143,11 @@ func (s *Server) Start() error {
 	if s.running {
 		return errors.New("ccu: server already running")
 	}
-	ln, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		return fmt.Errorf("ccu: listen: %w", err)
+	if err := s.listenLocked(s.addr); err != nil {
+		return err
 	}
-	s.listener = ln
-	srv := &http.Server{
-		Handler:           s.readyGate(s.basicAuthGate(s.handler)),
-		ReadHeaderTimeout: 30 * time.Second,
-	}
-	s.httpSrv = srv
 	s.rpc.SetActive(true)
 	s.running = true
-	go func() {
-		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Error("ccu: serve failed", "err", err)
-		}
-	}()
 	if s.enableLogic {
 		s.startLogic()
 	}
@@ -162,6 +162,7 @@ func (s *Server) Stop() error {
 		return nil
 	}
 	s.running = false
+	s.suspended = false
 	for _, d := range s.logics {
 		go d.Stop()
 	}
@@ -172,6 +173,7 @@ func (s *Server) Stop() error {
 	s.listener = nil
 	s.mu.Unlock()
 
+	s.releaseHeldCalls()
 	s.rpc.stopTimers()
 	s.rpc.stopDispatchers()
 	if err := s.rpc.saveRegistrations(); err != nil {
@@ -180,9 +182,33 @@ func (s *Server) Stop() error {
 	if err := s.rpc.SaveParamsets(); err != nil {
 		s.logger.Debug("ccu: save paramsets failed", "err", err)
 	}
+	if srv == nil {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return srv.Shutdown(ctx)
+}
+
+// listenLocked binds addr and serves the XML-RPC surface on it. The
+// caller holds the lock.
+func (s *Server) listenLocked(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("ccu: listen: %w", err)
+	}
+	s.listener = ln
+	srv := &http.Server{
+		Handler:           s.readyGate(s.basicAuthGate(s.handler)),
+		ReadHeaderTimeout: 30 * time.Second,
+	}
+	s.httpSrv = srv
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.logger.Error("ccu: serve failed", "err", err)
+		}
+	}()
+	return nil
 }
 
 func (s *Server) startLogic() {
@@ -223,7 +249,11 @@ func (s *Server) registerMethods() {
 	})
 
 	mux.Handle("getServiceMessages", func(_ context.Context, _ []xmlrpc.Value) (xmlrpc.Value, error) {
-		return xmlrpc.FromAny(any(rpc.GetServiceMessages())), nil
+		answer, err := rpc.ServiceMessagesAnswer()
+		if err != nil {
+			return nil, s.faultFromErr(err)
+		}
+		return xmlrpc.FromAny(answer), nil
 	})
 
 	mux.Handle("listBidcosInterfaces", func(_ context.Context, _ []xmlrpc.Value) (xmlrpc.Value, error) {
@@ -322,7 +352,7 @@ func (s *Server) registerMethods() {
 		if len(params) > 3 {
 			force, _ = xmlrpc.AsBool(params[3])
 		}
-		if err := rpc.SetValue(address, valueKey, value, force); err != nil {
+		if err := rpc.ClientSetValue(address, valueKey, value, force); err != nil {
 			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.StringValue(""), nil
@@ -340,7 +370,7 @@ func (s *Server) registerMethods() {
 		if len(params) > 3 {
 			force, _ = xmlrpc.AsBool(params[3])
 		}
-		if err := rpc.PutParamset(address, key, paramset, force); err != nil {
+		if err := rpc.ClientPutParamset(address, key, paramset, force); err != nil {
 			return nil, s.faultFromErr(err)
 		}
 		return xmlrpc.NilValue{}, nil
@@ -385,7 +415,11 @@ func (s *Server) registerMethods() {
 			return nil, fmt.Errorf("getAllMetadata: object_id required")
 		}
 		objectID, _ := xmlrpc.AsString(params[0])
-		return xmlrpc.FromAny(any(rpc.GetAllMetadata(objectID))), nil
+		all, err := rpc.AllMetadata(objectID)
+		if err != nil {
+			return nil, s.faultFromErr(err)
+		}
+		return xmlrpc.FromAny(any(all)), nil
 	})
 
 	// determineParameter asks the CCU to re-read a parameter. Clients

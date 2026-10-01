@@ -160,22 +160,36 @@ func (r *RPCFunctions) EnableBatchEvents() {
 }
 
 // dispatcherFor returns the dispatcher of a registered remote, starting
-// one on first use. The caller must hold the lock.
-func (r *RPCFunctions) dispatcherFor(interfaceID string, client remoteCaller) *dispatcher {
-	if d, ok := r.dispatchers[interfaceID]; ok {
+// one on first use. key is the registration's key. The caller must hold
+// the lock.
+func (r *RPCFunctions) dispatcherFor(key string, client remoteCaller) *dispatcher {
+	if d, ok := r.dispatchers[key]; ok {
 		return d
 	}
-	d := newDispatcher(client, func() {
+	var d *dispatcher
+	d = newDispatcher(client, func() {
 		r.mu.Lock()
-		delete(r.remotes, interfaceID)
-		if existing, ok := r.dispatchers[interfaceID]; ok {
-			delete(r.dispatchers, interfaceID)
+		if reg, ok := r.remotes[key]; ok && reg.client == client {
+			delete(r.remotes, key)
+		}
+		if existing, ok := r.dispatchers[key]; ok && existing == d {
+			delete(r.dispatchers, key)
 			existing.stop()
 		}
 		r.mu.Unlock()
 	})
-	r.dispatchers[interfaceID] = d
+	r.dispatchers[key] = d
 	return d
+}
+
+// dropDispatcherLocked stops the dispatcher of a registration that was
+// replaced or removed, so no event goes out to the client it held. The
+// caller must hold the lock.
+func (r *RPCFunctions) dropDispatcherLocked(key string) {
+	if d, ok := r.dispatchers[key]; ok {
+		delete(r.dispatchers, key)
+		d.stop()
+	}
 }
 
 // stopDispatchers shuts every delivery goroutine down.

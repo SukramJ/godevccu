@@ -352,7 +352,7 @@ func (h *Handlers) setValue(_ context.Context, params map[string]any) (any, erro
 	if h.RPC == nil {
 		return false, nil
 	}
-	if err := h.RPC.SetValue(address, valueKey, value, false); err != nil {
+	if err := h.RPC.ClientSetValue(address, valueKey, value, false); err != nil {
 		return false, nil
 	}
 	return true, nil
@@ -376,7 +376,7 @@ func (h *Handlers) putParamset(_ context.Context, params map[string]any) (any, e
 	if h.RPC == nil {
 		return false, nil
 	}
-	if err := h.RPC.PutParamset(address, key, paramset, false); err != nil {
+	if err := h.RPC.ClientPutParamset(address, key, paramset, false); err != nil {
 		return false, nil
 	}
 	return true, nil

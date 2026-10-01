@@ -6,6 +6,7 @@ package binrpc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -126,6 +127,10 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	}
 
 	result, dispatchErr := s.dispatcher.Dispatch(ctx, req.Method, req.Params)
+	if errors.Is(dispatchErr, xmlrpc.ErrDropConnection) {
+		s.logger.Debug("binrpc: connection dropped", "method", req.Method)
+		return
+	}
 
 	var buf bytes.Buffer
 	if dispatchErr != nil {

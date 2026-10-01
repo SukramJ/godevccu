@@ -21,6 +21,10 @@ type binrpcState struct {
 	srv    *binrpc.Server
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// resumeAddr is the address a suspended listener rebinds; see
+	// restart.go.
+	resumeAddr string
 }
 
 // StartBINRPC binds a BIN-RPC listener on addr and serves the same
@@ -39,6 +43,9 @@ func (s *Server) StartBINRPC(addr string) error {
 	}
 	srv, err := binrpc.NewServer(addr, binrpc.DispatcherFunc(
 		func(ctx context.Context, method string, params []xmlrpc.Value) (xmlrpc.Value, error) {
+			if err := s.intercept(ctx, method); err != nil {
+				return nil, err
+			}
 			return s.mux.Dispatch(ctx, method, params)
 		}), s.logger)
 	if err != nil {

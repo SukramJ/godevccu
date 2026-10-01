@@ -31,6 +31,26 @@ import (
 //	 -2   Unknown instance  Invalid device
 //	 -3   Unknown paramset  Unknown Paramset: <name>
 //	 -5   Unknown parameter Unknown Parameter for value key: <name>
+//
+// hm-simulator (https://github.com/hobbyquaker/hm-simulator,
+// lib/faults.js) records hmipserver 3.89.8 answering an unknown paramset
+// with -2 "Invalid device". The OpenCCU-Base sources contradict that for
+// a known device (read from the code, not measured on the wire):
+//
+//   - HMIPServer.jar (Build-Version 1.5.1-SNAPSHOT):
+//     DeviceUtil.getParameterSet/putParameterSet/getParamsetDescription
+//     raise NotificationUtil.getUnknownParamsetRpcRemoteException, -3
+//     "Unknown Paramset: <name>", for a key that is neither a standard
+//     paramset nor a link partner of the channel; -2 "Invalid device"
+//     comes from DeviceNotFoundException, i.e. an unknown address.
+//   - rfd (src/rfd/RFChannelDescription.cpp, GetParamset) falls back to
+//     the channel's LINK paramset for any unknown key and throws -3
+//     "Unknown paramset" (src/rfd/RFChannel.cpp) only when the channel
+//     has no LINK paramset either — hm-simulator's "rfd takes an unknown
+//     name as a peer address".
+//
+// -3 therefore stays. Why hm-simulator's probe saw -2 is not known.
+
 const (
 	// FaultUnknownError is the catch-all a CCU falls back to. It is
 	// also what the simulator reports for everything by default.

@@ -16,4 +16,15 @@ The embedded device and paramset descriptions were initially extracted
 from HomeMatic firmware XML. The eQ-3 license terms (non-commercial) apply
 to that data.
 
+The scenario API (internal/ccu/faultinject.go, restart.go, logs.go,
+internal/virtualccu/scenario.go, control.go) and the interface-process
+behaviours in internal/ccu/initsemantics.go, mastermodel.go and quirks.go
+are modelled on hm-simulator (https://github.com/hobbyquaker/hm-simulator),
+licensed under the MIT License:
+
+    Copyright (c) 2017 Sebastian Raff
+
+The measured interface-process behaviour those files reproduce is taken
+from hm-simulator's documentation; the Go implementation is new.
+
 See the LICENSE file for the full MIT License text.

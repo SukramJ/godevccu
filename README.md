@@ -14,6 +14,7 @@ It is designed for development and automated testing of Home Assistant and aioho
 - **397 device types** embedded from pydevccu (via `//go:embed`).
 - **Four backend modes**: `HOMEGEAR`, `CCU`, `OPENCCU` and `LITE` — a fake openccu-lite box.
 - **Built-in device behaviour simulators** for HM-Sec-SC-2 and HM-Sen-MDIR-WM55.
+- **Scenario API for failure testing** — inject faults, delays, hangs and closed connections, stop/restart individual interface processes, read back every client write and every callback (`InjectFault`, `RestartInterface`, `WriteLog`, `CallbackLog`), also over HTTP via `-control-port`. Modelled on [hm-simulator](https://github.com/hobbyquaker/hm-simulator), see [Acknowledgements](#acknowledgements).
 - **Single static binary** — no CGo dependency.
 
 ## Quick start
@@ -138,6 +139,19 @@ The CI workflow (`.github/workflows/ci.yml`) runs lint, vet, test and build on L
 Parts of `godevccu` are developed with agentic AI assistance, primarily [Claude Code](https://www.anthropic.com/claude-code). Submitted issues are also triaged and analysed with agentic help. Every change is still reviewed by a human maintainer and has to pass the project's tests before it lands — the AI accelerates the work, it does not replace the review gate.
 
 For contributions, the rules on AI usage are laid out in [`AI_POLICY.md`](AI_POLICY.md).
+
+## Acknowledgements
+
+The scenario API (fault injection, interface restarts, write and callback
+logs, control port, `-ports-json`) and the opt-in realism behaviours
+`InitSemantics`, `MasterModel`, `InterfaceQuirks` and
+`ServiceMessagesFault` are modelled on
+[hm-simulator](https://github.com/hobbyquaker/hm-simulator) by
+**Sebastian Raff** ([@hobbyquaker](https://github.com/hobbyquaker)),
+MIT-licensed. Its documentation of what rfd and hmipserver were measured
+to answer is the source of those behaviours; godevccu did not measure
+them itself. [`DOCUMENTATION.md`](DOCUMENTATION.md#where-these-behaviours-come-from)
+lists every behaviour with its source. Thank you!
 
 ## License
 

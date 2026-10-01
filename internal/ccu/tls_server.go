@@ -17,6 +17,12 @@ import (
 type tlsState struct {
 	srv      *http.Server
 	listener net.Listener
+
+	// The bound address and key material, kept so a restarted
+	// interface brings its TLS twin back on the same port.
+	addr    string
+	certPEM []byte
+	keyPEM  []byte
 }
 
 // StartTLS binds an HTTPS listener on addr serving the same XML-RPC
@@ -32,6 +38,12 @@ func (s *Server) StartTLS(addr string, certPEM, keyPEM []byte) error {
 	if s.tls.srv != nil {
 		return errors.New("ccu: TLS listener already started")
 	}
+	return s.startTLSLocked(addr, certPEM, keyPEM)
+}
+
+// startTLSLocked binds and serves the HTTPS listener. The caller holds
+// the lock.
+func (s *Server) startTLSLocked(addr string, certPEM, keyPEM []byte) error {
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		return fmt.Errorf("ccu: tls keypair: %w", err)
@@ -50,6 +62,8 @@ func (s *Server) StartTLS(addr string, certPEM, keyPEM []byte) error {
 	}
 	s.tls.srv = srv
 	s.tls.listener = ln
+	s.tls.addr = ln.Addr().String()
+	s.tls.certPEM, s.tls.keyPEM = certPEM, keyPEM
 	go func() {
 		if serveErr := srv.ServeTLS(ln, "", ""); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			s.logger.Error("ccu: tls serve failed", "err", serveErr)
@@ -75,6 +89,7 @@ func (s *Server) StopTLS() error {
 	srv := s.tls.srv
 	s.tls.srv = nil
 	s.tls.listener = nil
+	s.tls.addr = ""
 	s.mu.Unlock()
 	if srv == nil {
 		return nil

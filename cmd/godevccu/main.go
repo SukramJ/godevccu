@@ -10,11 +10,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -48,6 +53,10 @@ func run() error {
 	liteDevices := flag.String("lite-devices", "", "lite mode: comma-separated device types to load (empty: every embedded type)")
 	liteInterfaces := flag.String("lite-interfaces", "", "lite mode: comma-separated interfaces (empty: BidCos-RF, HmIP-RF, VirtualDevices)")
 	liteTLS := flag.Bool("lite-tls", false, "lite mode: serve HTTPS with a self-signed certificate, the way a box does")
+	realism := flag.Bool("realism", false, "enable every real-CCU behaviour (Realism CCU): fault codes, interface quirks, MASTER write models, ...")
+	interfaces := flag.String("interfaces", "", "separate interface listeners, e.g. BidCos-RF=2001,HmIP-RF=2010 (port 0: the system picks one)")
+	controlPort := flag.Int("control-port", -1, "serve the scenario API over HTTP on 127.0.0.1 at this port (0: the system picks one; default off)")
+	portsJSON := flag.String("ports-json", "", "once every server listens, write the bound ports as JSON to this file, or as one line to stdout with \"-\"")
 	flag.Parse()
 
 	if *showVersion {
@@ -74,8 +83,10 @@ func run() error {
 	cfg := godevccu.Defaults()
 	cfg.Mode = parsedMode
 	cfg.Host = *host
-	cfg.XMLRPCPort = *xmlRPCPort
-	cfg.JSONRPCPort = *jsonRPCPort
+	// Port 0 lets the system pick, as everywhere else on the command
+	// line; Config spells that EphemeralPort.
+	cfg.XMLRPCPort = ephemeral(*xmlRPCPort)
+	cfg.JSONRPCPort = ephemeral(*jsonRPCPort)
 	cfg.Username = *username
 	cfg.Password = *password
 	cfg.AuthEnabled = *auth
@@ -83,6 +94,16 @@ func run() error {
 	cfg.SetupDefaults = *defaults
 	cfg.EnableLogic = *logic
 	cfg.Logger = logger
+	if *realism {
+		cfg.Realism = godevccu.RealismCCU()
+	}
+	if *interfaces != "" {
+		ifacePorts, parseErr := parseInterfaces(*interfaces)
+		if parseErr != nil {
+			return parseErr
+		}
+		cfg.InterfacePorts = ifacePorts
+	}
 
 	v, err := godevccu.New(cfg)
 	if err != nil {
@@ -98,11 +119,89 @@ func run() error {
 		"json-rpc", v.JSONRPCAddr(),
 	)
 
+	ports := v.Ports()
+	var control *http.Server
+	if *controlPort >= 0 {
+		ln, err := net.Listen("tcp", net.JoinHostPort(godevccu.IPLocalhostV4, strconv.Itoa(*controlPort)))
+		if err != nil {
+			_ = v.Stop()
+			return fmt.Errorf("control port: %w", err)
+		}
+		control = &http.Server{Handler: v.ControlHandler(), ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			if err := control.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("control port failed", "err", err)
+			}
+		}()
+		ports["control"] = ln.Addr().(*net.TCPAddr).Port
+		logger.Info("control port listening", "addr", ln.Addr())
+	}
+	if *portsJSON != "" {
+		if err := writePorts(*portsJSON, ports); err != nil {
+			_ = v.Stop()
+			return err
+		}
+	}
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	logger.Info("godevccu shutting down")
+	if control != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = control.Shutdown(ctx)
+		cancel()
+	}
 	return v.Stop()
+}
+
+// ephemeral maps the command line's port 0 onto [godevccu.EphemeralPort].
+func ephemeral(port int) int {
+	if port == 0 {
+		return godevccu.EphemeralPort
+	}
+	return port
+}
+
+// parseInterfaces parses "Name=port,Name=port" into InterfacePorts.
+func parseInterfaces(s string) (map[string]int, error) {
+	out := make(map[string]int)
+	for _, item := range splitList(s) {
+		name, portText, ok := strings.Cut(item, "=")
+		if !ok {
+			// A bare name serves the interface on its CCU port.
+			out[item] = godevccu.DefaultInterfacePorts()[item]
+			continue
+		}
+		port, err := strconv.Atoi(strings.TrimSpace(portText))
+		if err != nil {
+			return nil, fmt.Errorf("interface %q: port %q: %w", name, portText, err)
+		}
+		out[strings.TrimSpace(name)] = ephemeral(port)
+	}
+	return out, nil
+}
+
+// writePorts writes the bound ports as JSON: one line to stdout for
+// "-", otherwise atomically to a file, so a reader never sees half of
+// it.
+func writePorts(target string, ports map[string]int) error {
+	data, err := json.Marshal(ports)
+	if err != nil {
+		return err
+	}
+	if target == "-" {
+		_, err := fmt.Fprintln(os.Stdout, string(data))
+		return err
+	}
+	tmp := target + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("ports-json: %w", err)
+	}
+	if err := os.Rename(tmp, target); err != nil {
+		return fmt.Errorf("ports-json: %w", err)
+	}
+	return nil
 }
 
 func parseMode(s string) (godevccu.BackendMode, error) {

@@ -5,6 +5,7 @@ package xmlrpc
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -22,7 +23,16 @@ type Handler struct {
 	// RequestLimit bounds the body in bytes. Zero means
 	// [DefaultRequestLimit].
 	RequestLimit int64
+
+	// Intercept, when set, runs before every dispatch. A returned
+	// [ErrDropConnection] closes the connection without an answer; any
+	// other error is answered as a fault instead of dispatching.
+	Intercept func(ctx context.Context, method string) error
 }
+
+// ErrDropConnection asks a transport to close the connection instead of
+// answering — the simulated process vanished mid-call.
+var ErrDropConnection = errors.New("xmlrpc: drop connection")
 
 // NewHandler builds a Handler with a fresh [Mux].
 func NewHandler() *Handler { return &Handler{Mux: NewMux()} }
@@ -60,7 +70,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	logger.Debug("xmlrpc: dispatch", "method", call.Method, "params", len(call.Params))
 
-	result, err := h.Mux.Dispatch(r.Context(), call.Method, call.Params)
+	var result Value
+	if h.Intercept != nil {
+		err = h.Intercept(r.Context(), call.Method)
+		if errors.Is(err, ErrDropConnection) {
+			logger.Debug("xmlrpc: connection dropped", "method", call.Method)
+			dropConnection(w)
+			return
+		}
+	}
+	if err == nil {
+		result, err = h.Mux.Dispatch(r.Context(), call.Method, call.Params)
+	}
 	resp := &MethodResponse{}
 	if err != nil {
 		resp.Fault = asFault(err)
@@ -92,4 +113,18 @@ func asFault(err error) *Fault {
 		return fault
 	}
 	return &Fault{Code: -1, Message: err.Error()}
+}
+
+// dropConnection closes the client connection without writing a
+// response.
+func dropConnection(w http.ResponseWriter) {
+	if hj, ok := w.(http.Hijacker); ok {
+		if conn, _, err := hj.Hijack(); err == nil {
+			_ = conn.Close()
+			return
+		}
+	}
+	// No hijacking (HTTP/2): abort the handler, which makes the server
+	// reset the stream without an answer.
+	panic(http.ErrAbortHandler)
 }

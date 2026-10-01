@@ -96,10 +96,10 @@ type Realism struct {
 	Ramps bool
 
 	// FaultCodes reports the HomeMatic fault catalogue (-2 unknown
-	// paramset, -4 unknown device, -5 unknown parameter, -6 invalid
-	// value) instead of answering every failure with -1. Clients decide
-	// from the code whether a call is worth retrying, and -1 lands in
-	// the retryable bucket.
+	// device, -3 unknown paramset, -5 unknown parameter or invalid
+	// value; see internal/ccu/faults.go) instead of answering every
+	// failure with -1. Clients decide from the code whether a call is
+	// worth retrying, and -1 lands in the retryable bucket.
 	FaultCodes bool
 
 	// NormalizeData completes the embedded device descriptions while
@@ -107,6 +107,39 @@ type Realism struct {
 	// serialises as <nil/>, mistyped BOOL defaults and the firmware
 	// fields. The fixtures stay untouched — they are import targets.
 	NormalizeData bool
+
+	// InitSemantics handles init() the way the interface processes do,
+	// as hm-simulator documents them: a registration is keyed by its
+	// url exactly (pydevccu keys by interface id and removes by a
+	// substring match, so init("http://h:1", "") also removes
+	// "http://h:10"), deleteDevices goes out before newDevices, a
+	// device whose VERSION differs is sent again, and HmIP devices are
+	// sent again on every init. See internal/ccu/initsemantics.go.
+	InitSemantics bool
+
+	// MasterModel answers MASTER writes with the models hm-simulator
+	// documents as measured on rfd and hmipserver: hmipserver stores
+	// everything, poisons a channel with an unknown parameter and
+	// raises a sticky CONFIG_PENDING on a wrong type; rfd never faults,
+	// drops, clamps and coerces, and raises CONFIG_PENDING while the
+	// change is queued. Chosen per device by its protocol family. See
+	// internal/ccu/mastermodel.go.
+	MasterModel bool
+
+	// InterfaceQuirks reproduces the answers hm-simulator documents for
+	// the individual interface processes: no PONG from hmipserver,
+	// getServiceMessages derived from the maintenance channels with
+	// rfd's empty string for "nothing pending", SENDER_BROKEN on rfd's
+	// unfiltered getLinks, and the metadata faults of rfd. Only
+	// meaningful with [Config.InterfacePorts]; see internal/ccu/quirks.go.
+	InterfaceQuirks bool
+
+	// ServiceMessagesFault makes getServiceMessages on HmIP-RF and
+	// VirtualDevices answer the unknown-method fault
+	// ("Invalid XML-RPC message"), as hm-simulator records those
+	// processes were seen to on firmware 3.89.x. Not part of
+	// [RealismCCU]: the observation is not consistent across versions.
+	ServiceMessagesFault bool
 }
 
 // RealismCCU returns a [Realism] with every behaviour enabled — the
@@ -129,6 +162,9 @@ func RealismCCU() Realism {
 		Ramps:           true,
 		FaultCodes:      true,
 		NormalizeData:   true,
+		InitSemantics:   true,
+		MasterModel:     true,
+		InterfaceQuirks: true,
 	}
 }
 

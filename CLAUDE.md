@@ -153,3 +153,14 @@ The packages mirror the pydevccu modules:
 - `pydevccu/CLAUDE.md` contains a compact pydevccu architecture
   overview — read it first before diving into individual Python
   modules.
+
+## Working with hm-simulator
+
+- [hm-simulator](https://github.com/hobbyquaker/hm-simulator) (Sebastian
+  Raff, MIT; reference checkout under `../hm-simulator`) is the source of
+  the scenario API and of the interface-process behaviours behind
+  `Realism.InitSemantics`, `MasterModel`, `InterfaceQuirks` and
+  `ServiceMessagesFault`. Its README says per behaviour whether it was
+  measured on a CCU or is a model — carry that distinction over, and
+  credit hm-simulator in the doc comment of anything taken from it.
+- These behaviours stay opt-in: the default run is pydevccu-shaped.

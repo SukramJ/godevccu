@@ -261,10 +261,20 @@ func TestRealismDefaultsAreOff(t *testing.T) {
 // TestRealismCCUEnablesEverything guards against a field being added to
 // Realism without being wired into the preset.
 func TestRealismCCUEnablesEverything(t *testing.T) {
+	// Left out on purpose: the getServiceMessages fault was observed on
+	// some firmware versions only (see Realism.ServiceMessagesFault).
+	excluded := map[string]bool{"ServiceMessagesFault": true}
 	full := godevccu.RealismCCU()
 	value := reflect.ValueOf(full)
 	for i := range value.NumField() {
 		field := value.Field(i)
+		name := value.Type().Field(i).Name
+		if excluded[name] {
+			if field.Bool() {
+				t.Errorf("RealismCCU enables %s, which is meant to stay opt-in", name)
+			}
+			continue
+		}
 		if field.Kind() == reflect.Bool && !field.Bool() {
 			t.Errorf("RealismCCU leaves %s off", value.Type().Field(i).Name)
 		}
