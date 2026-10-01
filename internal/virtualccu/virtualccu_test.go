@@ -7,8 +7,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -403,5 +405,151 @@ func TestZeroPortFallsBackToDefault(t *testing.T) {
 	}
 	if got.JSONRPCPort <= 0 {
 		t.Fatalf("JSONRPCPort = %d after defaults; want >0 (canonical port)", got.JSONRPCPort)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scenario API and control port (behaviours taken over from hm-simulator)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// startInterfaceCCU boots a CCU with separate BidCos-RF and HmIP-RF
+// listeners on ephemeral ports.
+func startInterfaceCCU(t *testing.T, realism virtualccu.Realism) *virtualccu.VirtualCCU {
+	t.Helper()
+	v, err := virtualccu.New(virtualccu.Config{
+		Mode:        hmconst.BackendModeOpenCCU,
+		Host:        "127.0.0.1",
+		XMLRPCPort:  virtualccu.EphemeralPort,
+		JSONRPCPort: virtualccu.EphemeralPort,
+		Devices:     []string{"HmIP-SWSD", "HM-LC-Sw1-Pl-2"},
+		Realism:     realism,
+		InterfacePorts: map[string]int{
+			hmconst.InterfaceBidCosRF: virtualccu.EphemeralPort,
+			hmconst.InterfaceHmIPRF:   virtualccu.EphemeralPort,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := v.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = v.Stop() })
+	return v
+}
+
+// control posts one scenario call to the control handler.
+func control(t *testing.T, base, call string, args ...any) (int, map[string]any) {
+	t.Helper()
+	body, _ := json.Marshal(args)
+	resp, err := http.Post(base+"/scenario/"+call, "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("%s: %v", call, err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+func TestControlPortInjectsFaultsAndRestartsInterfaces(t *testing.T) {
+	v := startInterfaceCCU(t, virtualccu.Realism{})
+	ctrl := httptest.NewServer(v.ControlHandler())
+	t.Cleanup(ctrl.Close)
+	ip := v.InterfaceAddr(hmconst.InterfaceHmIPRF).String()
+	rf := xmlrpc.NewClient("http://" + v.InterfaceAddr(hmconst.InterfaceBidCosRF).String() + "/")
+	hmip := xmlrpc.NewClient("http://" + ip + "/")
+
+	// A fault on HmIP-RF only.
+	status, _ := control(t, ctrl.URL, "injectFault", hmconst.InterfaceHmIPRF,
+		map[string]any{"method": "getVersion", "faultCode": -2, "faultString": "Invalid device"})
+	if status != http.StatusOK {
+		t.Fatalf("injectFault status %d", status)
+	}
+	var fault *xmlrpc.Fault
+	if _, err := hmip.Call(context.Background(), "getVersion", nil); !errors.As(err, &fault) || fault.Code != -2 {
+		t.Fatalf("HmIP-RF getVersion: %v, want the injected -2", err)
+	}
+	if _, err := rf.Call(context.Background(), "getVersion", nil); err != nil {
+		t.Fatalf("BidCos-RF hit by an HmIP-RF rule: %v", err)
+	}
+
+	// Stop and start the interface process on the same port.
+	if status, _ := control(t, ctrl.URL, "stopInterface", hmconst.InterfaceHmIPRF); status != http.StatusOK {
+		t.Fatalf("stopInterface status %d", status)
+	}
+	if conn, err := net.DialTimeout("tcp", ip, time.Second); err == nil {
+		_ = conn.Close()
+		t.Fatal("stopped interface accepted a connection")
+	}
+	if status, _ := control(t, ctrl.URL, "startInterface", hmconst.InterfaceHmIPRF, true); status != http.StatusOK {
+		t.Fatalf("startInterface status %d", status)
+	}
+	if _, err := hmip.Call(context.Background(), "getVersion", nil); err != nil {
+		t.Fatalf("restarted interface: %v", err)
+	}
+	if status, _ := control(t, ctrl.URL, "restartInterface", hmconst.InterfaceHmIPRF, 50, false); status != http.StatusOK {
+		t.Fatalf("restartInterface status %d", status)
+	}
+
+	// Unknown interface and unknown call.
+	if status, body := control(t, ctrl.URL, "dropConnection", "NoSuch-RF"); status != http.StatusBadRequest || body["faultString"] == nil {
+		t.Fatalf("unknown interface: %d %v", status, body)
+	}
+	if status, _ := control(t, ctrl.URL, "noSuchCall"); status != http.StatusNotFound {
+		t.Fatalf("unknown call: status %d, want 404", status)
+	}
+
+	// Ports name every listener.
+	resp, err := http.Get(ctrl.URL + "/ports")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var ports map[string]int
+	_ = json.NewDecoder(resp.Body).Decode(&ports)
+	if ports[hmconst.InterfaceHmIPRF] == 0 || ports["xmlrpc"] == 0 || ports["jsonrpc"] == 0 {
+		t.Fatalf("ports = %v", ports)
+	}
+}
+
+func TestControlPortWriteLog(t *testing.T) {
+	v := startInterfaceCCU(t, virtualccu.Realism{})
+	ctrl := httptest.NewServer(v.ControlHandler())
+	t.Cleanup(ctrl.Close)
+	rf := xmlrpc.NewClient("http://" + v.InterfaceAddr(hmconst.InterfaceBidCosRF).String() + "/")
+	root := v.InterfaceRPC(hmconst.InterfaceBidCosRF).SupportedDevices()["HM-LC-Sw1-Pl-2"]
+
+	if _, err := rf.Call(context.Background(), "setValue", []xmlrpc.Value{
+		xmlrpc.StringValue(root + ":1"), xmlrpc.StringValue("STATE"), xmlrpc.BoolValue(true),
+	}); err != nil {
+		t.Fatalf("setValue: %v", err)
+	}
+	_, body := control(t, ctrl.URL, "writeLog")
+	entries, _ := body["result"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("write log = %v", body)
+	}
+	entry := entries[0].(map[string]any)
+	if entry["interface"] != hmconst.InterfaceBidCosRF || entry["method"] != "setValue" || entry["address"] != root+":1" {
+		t.Fatalf("entry = %v", entry)
+	}
+	control(t, ctrl.URL, "clearLogs")
+	if len(v.WriteLog()) != 0 {
+		t.Fatal("clearLogs left entries")
+	}
+}
+
+// RealismCCU switches the interface quirks on: rfd answers an empty
+// getServiceMessages with the empty string.
+func TestRealismInterfaceQuirksOnTheWire(t *testing.T) {
+	v := startInterfaceCCU(t, virtualccu.RealismCCU())
+	rf := xmlrpc.NewClient("http://" + v.InterfaceAddr(hmconst.InterfaceBidCosRF).String() + "/")
+	resp, err := rf.Call(context.Background(), "getServiceMessages", nil)
+	if err != nil {
+		t.Fatalf("getServiceMessages: %v", err)
+	}
+	if s, ok := resp.(xmlrpc.StringValue); !ok || s != "" {
+		t.Fatalf("rfd getServiceMessages = %#v, want the empty string", resp)
 	}
 }

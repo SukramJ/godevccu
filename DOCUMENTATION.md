@@ -10,20 +10,21 @@ CCU/OpenCCU simulation with the JSON-RPC web API.
 ## Contents
 
 1. [Realism (opt-in)](#realism-opt-in)
-2. [Backend modes](#backend-modes)
-3. [Fake openccu-lite box (pkg/litefake)](#fake-openccu-lite-box-pkglitefake)
-4. [VirtualCCU](#virtualccu)
-5. [State manager](#state-manager)
-6. [Session management](#session-management)
-7. [XML-RPC layer](#xml-rpc-layer)
-8. [BIN-RPC layer (CUxD)](#bin-rpc-layer-cuxd)
-9. [JSON-RPC layer](#json-rpc-layer)
-10. [ReGa script engine](#rega-script-engine)
-11. [Device definitions](#device-definitions)
-12. [Device behaviour simulators](#device-behaviour-simulators)
-13. [Configuration](#configuration)
-14. [Persistence](#persistence)
-15. [Example workflows](#example-workflows)
+2. [Scenario API and control port](#scenario-api-and-control-port)
+3. [Backend modes](#backend-modes)
+4. [Fake openccu-lite box (pkg/litefake)](#fake-openccu-lite-box-pkglitefake)
+5. [VirtualCCU](#virtualccu)
+6. [State manager](#state-manager)
+7. [Session management](#session-management)
+8. [XML-RPC layer](#xml-rpc-layer)
+9. [BIN-RPC layer (CUxD)](#bin-rpc-layer-cuxd)
+10. [JSON-RPC layer](#json-rpc-layer)
+11. [ReGa script engine](#rega-script-engine)
+12. [Device definitions](#device-definitions)
+13. [Device behaviour simulators](#device-behaviour-simulators)
+14. [Configuration](#configuration)
+15. [Persistence](#persistence)
+16. [Example workflows](#example-workflows)
 
 ---
 
@@ -32,7 +33,7 @@ CCU/OpenCCU simulation with the JSON-RPC web API.
 pydevccu parity is a contract, so every behaviour where a real CCU
 differs from pydevccu sits behind `Config.Realism`. The zero value
 reproduces the established behaviour bit for bit; `godevccu.RealismCCU()`
-switches everything on.
+switches everything on (except `ServiceMessagesFault`, see below).
 
 | Field | What it changes |
 |-------|-----------------|
@@ -48,8 +49,12 @@ switches everything on.
 | `BackupAPI` | `/api/backup/*` and a backup that actually reaches "completed". |
 | `Lifecycle` | Pairing counts down (`getInstallMode` reports the remainder) and a firmware update walks `FIRMWARE_UPDATE_STATE` through its progression. |
 | `Ramps` | An actuator move reports a travelling `ACTIVITY_STATE` first and the idle state after the travel time. The value itself still lands immediately. |
-| `FaultCodes` | The HomeMatic fault catalogue (−2/−4/−5/−6) instead of answering everything with −1, which clients read as "retryable". |
+| `FaultCodes` | The HomeMatic fault catalogue (−2 unknown device, −3 unknown paramset, −5 unknown parameter or invalid value) instead of answering everything with −1, which clients read as "retryable". |
 | `NormalizeData` | Completes the embedded descriptions while loading: missing parameter `ID`s, `UNIT: null` (which serialises as `<nil/>`), mistyped BOOL defaults, empty firmware fields. The fixtures stay untouched. |
+| `InitSemantics` | `init()` as the interface processes handle it: a registration is keyed by its url exactly (pydevccu keys by interface id and removes by substring, so `init("http://h:1", "")` also removes `http://h:10`), `deleteDevices` precedes `newDevices`, a device in another `VERSION` is sent again, HmIP devices are sent again on every init. |
+| `MasterModel` | MASTER writes answered with rfd's and hmipserver's models, chosen per device by protocol family — see [MASTER write models](#master-write-models). |
+| `InterfaceQuirks` | Per-process answers: no PONG from hmipserver, `getServiceMessages` derived from the maintenance channels with rfd's `""` for "nothing pending", `SENDER_BROKEN` on rfd's unfiltered `getLinks`, rfd's `-1 Failure` for unset metadata. Only with `InterfacePorts`. |
+| `ServiceMessagesFault` | `getServiceMessages` on HmIP-RF and VirtualDevices answers `-1 Invalid XML-RPC message`. **Not** part of `RealismCCU()`: it was observed on some 3.89.x systems only. |
 
 ### Separate interface listeners
 
@@ -93,6 +98,135 @@ v, _ := godevccu.New(godevccu.Config{
 ports (2001/42001, 80/443). Without a supplied certificate a self-signed
 one is generated at startup. `TLS.Redirect` makes the plaintext web API
 answer 302 and `CCU.getHttpsRedirectEnabled` report true.
+
+---
+
+## Scenario API and control port
+
+What a test calls to make an interface process misbehave and to look
+at what the client under test did. The set of calls, the restart
+semantics, the fault-injection rule shape, the two logs and the control
+port follow [hm-simulator](https://github.com/hobbyquaker/hm-simulator)
+by Sebastian Raff (MIT), the Node.js CCU simulator behind the tests of
+node-red-contrib-ccu, hm2mqtt.js and Homematic Manager.
+
+An interface is named as in `Config.InterfacePorts`; `""` is the main
+XML-RPC endpoint, `"*"` (where accepted) every server.
+
+```go
+// Make the next two getVersion calls on HmIP-RF fault.
+v.InjectFault("HmIP-RF", godevccu.FaultRule{
+    Method: "getVersion", Times: 2,
+    Fault:  &godevccu.Fault{Code: -2, Message: "Invalid device"},
+})
+v.InjectFault("*", godevccu.FaultRule{Method: "init", Hang: true})       // never answer
+v.InjectFault("BidCos-RF", godevccu.FaultRule{CloseConnection: true})    // reset instead
+v.InjectFault("HmIP-RF", godevccu.FaultRule{Delay: 1500 * time.Millisecond, Times: -1})
+v.ClearFaults("*")                    // drop the rules, let held calls go
+
+v.DropConnection("HmIP-RF")           // restart in an instant, clients forgotten
+v.StopInterface("BidCos-RF")          // port refuses connections
+v.StartInterface("BidCos-RF", false)  // remembered clients are called back
+v.RestartInterface("HmIP-RF", 2*time.Second, true)
+
+v.WriteLog()          // every client setValue/putParamset, with rejected parameters
+v.CallbackLog()       // every call to a client: sent, answered, error
+v.ConfigPending("HmIP-RF")    // with MasterModel
+v.PoisonedChannels("HmIP-RF") // with MasterModel
+v.SetDeviceUnreachable("VCU0000322", true)
+v.Ports()             // {"xmlrpc":…, "jsonrpc":…, "BidCos-RF":…, …}
+```
+
+- **Fault rules** apply to the top-level call on every transport of a
+  server (XML-RPC, its TLS twin, BIN-RPC). `Times` 0 means once, a
+  negative value until `ClearFaults`.
+- **Restarts** keep devices, paramsets and fault rules. A process that
+  remembers its clients calls `system.listMethods` (BidCos interfaces),
+  then `listDevices` and the device diff — calls the client did not ask
+  for, which is how it can tell the process restarted.
+- **The logs** hold the newest 10 000 entries each. Writes the simulator
+  makes itself (device behaviour, `SimulateDeviceEvent`) are not logged.
+
+### Control port
+
+`VirtualCCU.ControlHandler()` serves the same calls over HTTP; the CLI
+exposes it on loopback with `-control-port`:
+
+```bash
+./bin/godevccu -xml-rpc-port 0 -json-rpc-port 0 \
+    -interfaces BidCos-RF=0,HmIP-RF=0 -realism -control-port 0 -ports-json -
+{"BidCos-RF":52753,"HmIP-RF":52754,"control":52757,"jsonrpc":52756,"xmlrpc":52755}
+
+curl -s -X POST localhost:52757/scenario/injectFault \
+    -d '["HmIP-RF", {"method": "getVersion", "faultCode": -2, "faultString": "Invalid device"}]'
+```
+
+`POST /scenario/<call>` takes a JSON array of the arguments (`GET` for
+calls without any) and answers `{"result": …}`; a failed call is 400
+with `faultCode`/`faultString`, an unknown call 404. `GET /ports` answers
+the ports. Calls: `injectFault` (`[iface, {method, times, faultCode,
+faultString, delayMs, hang, closeConnection}]`), `clearFaults`,
+`dropConnection`, `stopInterface`, `startInterface` (`[iface,
+forgetClients]`), `restartInterface` (`[iface, downMs, forgetClients]`),
+`setDeviceUnreachable`, `simulateDeviceEvent`, `fireEvent`, `writeLog`,
+`callbackLog`, `clearLogs`, `configPending`, `poisonedChannels`, `ports`.
+The handler has no authentication — keep it on loopback.
+
+`-ports-json <file|->` writes the bound ports once every server listens:
+one line on stdout for `-` (the log goes to stderr), otherwise atomically
+to the file. Port `0` on the command line lets the system pick.
+
+### MASTER write models
+
+With `Realism.MasterModel` a MASTER write is answered the way the
+interface process of the device's protocol family answers it.
+VirtualDevices keep the default path.
+
+| | hmipserver (HmIP-RF) | rfd / hs485d (BidCos) |
+|---|---|---|
+| unknown parameter | stored for ever, channel poisoned: every later MASTER write faults, even `{}` | dropped |
+| read-only parameter | not stored | dropped |
+| wrong type | stored, write faults, sticky `CONFIG_PENDING` | ignored (`FLOAT` sent as `<int>` too) |
+| number out of range | accepted unchanged | clamped |
+| string for a number | invalid (see wrong type) | coerced (`"12abc"` → 12) |
+| `CONFIG_PENDING` | sticky on an invalid change; cleared by a write that leaves nothing invalid | raised by a change, clears after the CONFIG_PENDING span |
+| fault | `ErrInvalidValue` (−5 with `FaultCodes`) when anything stored is invalid or the channel is poisoned | never |
+
+`CONFIG_PENDING` is only reported where the maintenance channel
+describes it. godevccu re-validates only values a client wrote, not the
+description defaults, so a mistyped default in the embedded data cannot
+fault every write.
+
+### Where these behaviours come from
+
+None of the behaviours in this section was measured for godevccu. They
+are taken from hm-simulator's documentation and code, which in turn
+says for each whether it was measured on a CCU or is a model:
+
+| Behaviour | Source | hm-simulator says |
+|---|---|---|
+| MASTER models of rfd and hmipserver | README "CONFIG_PENDING", `lib/validate.js`, `lib/sim.js` `putMasterHmip`/`putMasterBidcos` | measured, firmware 3.89.8 (Homematic Manager task 6) |
+| rfd ignores a FLOAT sent as `<int>` | `lib/validate.js` `bidcosStoredValue` | measured, not modelled there (JavaScript loses the distinction) |
+| no PONG from hmipserver | `lib/sim.js` `MEASURED_INTERFACE_DEFAULTS`, citing eq-3/occu#42 | measured |
+| rfd `getServiceMessages` → `""` when empty | README "Service messages" | measured |
+| `getServiceMessages` fault on HmIP/VirtualDevices | README "Service messages" | seen on 3.89.x, not consistently |
+| `SENDER_BROKEN` on rfd's unfiltered `getLinks` | README "Direct links" | measured, firmware 3.89.11 |
+| rfd `getMetadata`/`getAllMetadata` → `-1 Failure`, hmipserver `""` | README "The calls of Homematic Manager" | measured, firmware 3.89.11 |
+| `init` keyed by exact url | README "Connecting a client" | stated as CCU behaviour |
+| HmIP devices resent on every init | `lib/sim.js` `checkDevices`, citing eq-3/occu#45 | stated as CCU behaviour |
+| restart callbacks (`system.listMethods`, `listDevices`) | `lib/sim.js` `startInterface` | rfd with its handlers file |
+| delay/hang/close fault rules, logs, control port | `lib/sim.js`, README "Scenario API" | test tooling, no claim about the CCU |
+
+**Fault code for an unknown paramset.** hm-simulator records hmipserver
+answering an unknown paramset with −2 `Invalid device` (firmware
+3.89.8); `internal/ccu/faults.go` uses −3. The OpenCCU-Base sources
+support −3 for a known device. This was read from the code, not
+measured on the wire:
+
+- `opt/HMServer/HMIPServer.jar` (Build-Version 1.5.1-SNAPSHOT): `DeviceUtil.getParameterSet`, `putParameterSet` and `getParamsetDescription` throw −3 `Unknown Paramset: <name>` for a key that is neither a standard paramset nor a link partner of the channel. −2 `Invalid device` is reserved for `DeviceNotFoundException`, i.e. an unknown address.
+- rfd (`src/rfd/RFChannelDescription.cpp`, `GetParamset`) falls back to the channel's LINK paramset for any unknown key. It throws −3 `Unknown paramset` only when there is no LINK paramset either, which is what hm-simulator describes as "rfd takes an unknown name as a peer address".
+
+godevccu keeps −3. Why hm-simulator's probe saw −2 is not known.
 
 ---
 

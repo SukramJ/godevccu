@@ -7,10 +7,12 @@
 package godevccu
 
 import (
+	"github.com/SukramJ/godevccu/internal/ccu"
 	"github.com/SukramJ/godevccu/internal/devicelogic"
 	"github.com/SukramJ/godevccu/internal/hmconst"
 	"github.com/SukramJ/godevccu/internal/state"
 	"github.com/SukramJ/godevccu/internal/virtualccu"
+	"github.com/SukramJ/godevccu/internal/xmlrpc"
 )
 
 // Re-export the protocol constants so callers do not need to reach
@@ -121,3 +123,26 @@ type (
 	// AddSystemVariable.
 	AddSystemVariableOpts = state.AddSystemVariableOpts
 )
+
+// Scenario API re-exports; see [VirtualCCU.InjectFault],
+// [VirtualCCU.RestartInterface], [VirtualCCU.WriteLog] and
+// [VirtualCCU.ControlHandler].
+type (
+	// FaultRule makes the next calls of a method misbehave: answer a
+	// fault, answer late, never answer, or close the connection.
+	FaultRule = ccu.FaultRule
+	// Fault is an XML-RPC fault, as answered by an injected rule.
+	Fault = xmlrpc.Fault
+	// WriteEntry is one client write recorded in the write log.
+	WriteEntry = ccu.WriteEntry
+	// RejectedParameter is one parameter a MASTER write model did not
+	// take as sent.
+	RejectedParameter = ccu.RejectedParameter
+	// CallbackEntry is one call the simulator made to a client.
+	CallbackEntry = ccu.CallbackEntry
+	// ConfigPendingEntry is one device with a pending configuration.
+	ConfigPendingEntry = ccu.ConfigPendingEntry
+)
+
+// ErrUnknownInterface reports an interface name the run did not start.
+var ErrUnknownInterface = virtualccu.ErrUnknownInterface

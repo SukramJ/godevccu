@@ -9,6 +9,56 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+Scenario API and interface-process behaviours modelled on
+[hm-simulator](https://github.com/hobbyquaker/hm-simulator) by Sebastian
+Raff (MIT) — thanks for documenting what rfd and hmipserver actually
+answer. Every behaviour below that concerns the CCU comes from that
+documentation and was not measured for godevccu; `DOCUMENTATION.md`
+lists the source of each.
+
+### Added
+
+- **Fault injection**: `VirtualCCU.InjectFault(iface, FaultRule)` makes
+  the next calls of a method answer a fault, answer late, never answer,
+  or close the connection — on XML-RPC, its TLS twin and BIN-RPC alike;
+  `ClearFaults` drops the rules and releases held calls.
+- **Interface restarts**: `DropConnection`, `StopInterface`,
+  `StartInterface(iface, forgetClients)` and `RestartInterface` stop an
+  interface process (its port refuses connections) and bring it back on
+  the same port, forgetting its clients or calling them back
+  (`system.listMethods` on BidCos, then `listDevices`).
+- **Introspection**: `WriteLog` (every client `setValue`/`putParamset`
+  over XML-RPC, BIN-RPC and JSON-RPC, with rejected parameters and the
+  fault) and `CallbackLog` (every call to a client with sent/answered
+  time), `ConfigPending`, `PoisonedChannels`, `Ports`.
+- **Control port**: `VirtualCCU.ControlHandler()` serves the scenario
+  API as `POST /scenario/<call>`; the CLI exposes it with
+  `-control-port`. `-ports-json <file|->` writes the bound ports once
+  every server listens; port `0` now lets the system pick; `-realism`
+  and `-interfaces Name=port,…` reach the realism preset and the
+  separate interface listeners from the command line.
+- Realism fields: `InitSemantics` (init keyed by exact url,
+  `deleteDevices` before `newDevices`, VERSION diff, HmIP resend),
+  `MasterModel` (rfd's and hmipserver's MASTER write models with sticky
+  and queued `CONFIG_PENDING` and poisoned channels), `InterfaceQuirks`
+  (no PONG from hmipserver, derived `getServiceMessages` with rfd's
+  `""`, `SENDER_BROKEN` on rfd's unfiltered `getLinks`, rfd's metadata
+  faults) — all three part of `RealismCCU()` — and
+  `ServiceMessagesFault`, which stays out of the preset.
+
+### Fixed
+
+- Re-registering or removing a client now stops its batched-event
+  dispatcher; before, a client re-registered under the same interface id
+  with a new url kept receiving batched events at the old url.
+
+### Changed
+
+- Persisted init registrations (`PersistInit`) are written as a list of
+  `{interface_id, url}`; the earlier map format is still read.
+- The `Realism.FaultCodes` doc comment listed codes that did not match
+  `internal/ccu/faults.go`; it now names −2/−3/−5 as implemented.
+
 ## [0.4.0] — 2026-10-01
 
 ### Added

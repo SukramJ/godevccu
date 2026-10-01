@@ -74,7 +74,7 @@ type RPCFunctions struct {
 	metadata map[string]map[string]any
 
 	// callback wiring
-	remotes           map[string]remoteCaller
+	remotes           map[string]registration
 	paramsetCallbacks []EventCallback
 
 	// onSetValue is invoked synchronously after every successful
@@ -119,6 +119,23 @@ type RPCFunctions struct {
 	configPendingFor    time.Duration
 	configPendingTimers map[string]*time.Timer
 	timersStopped       bool
+
+	// init() keyed by url, with the interface processes' device diff;
+	// see initsemantics.go.
+	initSemantics bool
+
+	// Introspection logs; see logs.go.
+	writeLog    *boundedLog[WriteEntry]
+	callbackLog *boundedLog[CallbackEntry]
+
+	// MASTER write models of rfd and hmipserver; see mastermodel.go.
+	masterModel   bool
+	pendingSticky map[string]bool
+	poisoned      map[string]struct{}
+
+	// Interface-process quirks; see quirks.go.
+	quirks               bool
+	serviceMessagesFault bool
 
 	// runtime flag toggled by the surrounding ServerThread.
 	active bool
@@ -230,13 +247,17 @@ func NewRPCFunctions(opts Options) (*RPCFunctions, error) {
 		linkParamsets:       make(map[linkKey]map[string]any),
 		linkInfo:            make(map[linkKey]linkDetails),
 		metadata:            make(map[string]map[string]any),
-		remotes:             make(map[string]remoteCaller),
+		remotes:             make(map[string]registration),
 		configPendingTimers: make(map[string]*time.Timer),
 		rampTimers:          make(map[string]*time.Timer),
 		firmwareTimers:      make(map[string]*time.Timer),
 		suppressed:          make(map[string]map[string]struct{}),
 		dispatchers:         make(map[string]*dispatcher),
 		onSetValue:          opts.OnSetValue,
+		writeLog:            &boundedLog[WriteEntry]{},
+		callbackLog:         &boundedLog[CallbackEntry]{},
+		pendingSticky:       make(map[string]bool),
+		poisoned:            make(map[string]struct{}),
 	}
 
 	if _, err := rpc.loadDevices(opts.Devices); err != nil {
@@ -350,13 +371,11 @@ func (r *RPCFunctions) AddDevices(ctx context.Context, devices []string) error {
 		return nil
 	}
 	r.mu.Lock()
-	remotes := make(map[string]remoteCaller, len(r.remotes))
-	for k, v := range r.remotes {
-		remotes[k] = v
-	}
+	remotes := r.snapshotRemotesLocked()
 	r.mu.Unlock()
 
-	for ifID, client := range remotes {
+	for _, e := range remotes {
+		ifID, client := e.interfaceID, e.client
 		params := []xmlrpc.Value{
 			xmlrpc.StringValue(ifID),
 			xmlrpc.FromAny(any(toAnySlice(added))),
@@ -416,15 +435,13 @@ func (r *RPCFunctions) DeleteDevice(ctx context.Context, address string, _ int) 
 		return
 	}
 
-	remotes := make(map[string]remoteCaller, len(r.remotes))
-	for k, v := range r.remotes {
-		remotes[k] = v
-	}
+	remotes := r.snapshotRemotesLocked()
 	r.mu.Unlock()
 
 	// Push deleteDevices to every registered callback receiver after the
 	// state mutation is complete.
-	for ifID, client := range remotes {
+	for _, e := range remotes {
+		ifID, client := e.interfaceID, e.client
 		params := []xmlrpc.Value{
 			xmlrpc.StringValue(ifID),
 			xmlrpc.FromAny(any(addresses)),
@@ -468,13 +485,11 @@ func (r *RPCFunctions) RemoveDevices(ctx context.Context, devices []string) {
 		r.devices = filtered
 	}
 
-	remotes := make(map[string]remoteCaller, len(r.remotes))
-	for k, v := range r.remotes {
-		remotes[k] = v
-	}
+	remotes := r.snapshotRemotesLocked()
 	r.mu.Unlock()
 
-	for ifID, client := range remotes {
+	for _, e := range remotes {
+		ifID, client := e.interfaceID, e.client
 		params := []xmlrpc.Value{
 			xmlrpc.StringValue(ifID),
 			xmlrpc.FromAny(any(addresses)),
@@ -491,13 +506,11 @@ func (r *RPCFunctions) RemoveDevices(ctx context.Context, devices []string) {
 // wire shape is (interfaceID, oldDeviceAddress, newDeviceAddress).
 func (r *RPCFunctions) ReplaceDevice(ctx context.Context, oldAddress, newAddress string) {
 	r.mu.Lock()
-	remotes := make(map[string]remoteCaller, len(r.remotes))
-	for k, v := range r.remotes {
-		remotes[k] = v
-	}
+	remotes := r.snapshotRemotesLocked()
 	r.mu.Unlock()
 
-	for ifID, client := range remotes {
+	for _, e := range remotes {
+		ifID, client := e.interfaceID, e.client
 		params := []xmlrpc.Value{
 			xmlrpc.StringValue(ifID),
 			xmlrpc.StringValue(oldAddress),
@@ -515,13 +528,11 @@ func (r *RPCFunctions) ReplaceDevice(ctx context.Context, oldAddress, newAddress
 // of the re-add. The wire shape is (interfaceID, addresses[]).
 func (r *RPCFunctions) ReaddedDevice(ctx context.Context, addresses []string) {
 	r.mu.Lock()
-	remotes := make(map[string]remoteCaller, len(r.remotes))
-	for k, v := range r.remotes {
-		remotes[k] = v
-	}
+	remotes := r.snapshotRemotesLocked()
 	r.mu.Unlock()
 
-	for ifID, client := range remotes {
+	for _, e := range remotes {
+		ifID, client := e.interfaceID, e.client
 		params := []xmlrpc.Value{
 			xmlrpc.StringValue(ifID),
 			xmlrpc.FromAny(any(addresses)),
@@ -550,6 +561,8 @@ func deviceMatchesType(d map[string]any, typeName string) bool {
 func (r *RPCFunctions) clearAddressCachesLocked(address string) {
 	addrUp := strings.ToUpper(address)
 	delete(r.deviceByAddress, addrUp)
+	delete(r.poisoned, addrUp)
+	delete(r.pendingSticky, addrUp)
 	delete(r.paramsetDescByAddr, address)
 	delete(r.paramsets, address)
 	for _, k := range []string{hmconst.ParamsetAttrValues, hmconst.ParamsetAttrMaster} {
@@ -583,6 +596,10 @@ func (r *RPCFunctions) ListDevices() []map[string]any {
 // to the remote that owns the interface, or to all remotes when the id
 // carries no routable prefix.
 func (r *RPCFunctions) Ping(callerID string) bool {
+	if r.quirkFamily() == hmconst.InterfaceHmIPRF {
+		// hmipserver answers ping without the PONG event; see quirks.go.
+		return true
+	}
 	r.firePong(callerID)
 	return true
 }
@@ -596,7 +613,13 @@ func (r *RPCFunctions) firePong(callerID string) {
 		target = callerID[:idx]
 	}
 	r.mu.Lock()
-	_, addressed := r.remotes[target]
+	addressed := false
+	for _, reg := range r.remotes {
+		if reg.interfaceID == target {
+			addressed = true
+			break
+		}
+	}
 	r.mu.Unlock()
 
 	if addressed {
@@ -803,6 +826,13 @@ func (r *RPCFunctions) GetValue(address, valueKey string) (any, error) {
 // SetValue routes to PutParamset, applying converter expansion when the
 // value key is a combined parameter.
 func (r *RPCFunctions) SetValue(address, valueKey string, value any, force bool) error {
+	_, err := r.setValue(address, valueKey, value, force)
+	return err
+}
+
+// setValue is SetValue, reporting what a write model did not take as
+// sent.
+func (r *RPCFunctions) setValue(address, valueKey string, value any, force bool) ([]RejectedParameter, error) {
 	if converter.IsConvertable(valueKey) {
 		s, _ := value.(string)
 		// Surface the raw combined-parameter write to OnSetValue
@@ -816,9 +846,9 @@ func (r *RPCFunctions) SetValue(address, valueKey string, value any, force bool)
 			hook(address, valueKey, value)
 		}
 		paramset := converter.ConvertCombinedParameterToParamset(valueKey, s)
-		return r.PutParamset(address, hmconst.ParamsetAttrValues, paramset, force)
+		return r.putParamset(address, hmconst.ParamsetAttrValues, paramset, force)
 	}
-	return r.PutParamset(address, hmconst.ParamsetAttrValues, map[string]any{valueKey: value}, force)
+	return r.putParamset(address, hmconst.ParamsetAttrValues, map[string]any{valueKey: value}, force)
 }
 
 // SimulateDeviceEvent emulates the CCU RF/HmIP layer delivering an
@@ -841,10 +871,17 @@ func (r *RPCFunctions) SimulateDeviceEvent(address, valueKey string, value any) 
 // registered via AddLink first; values are accepted even when the entry does not
 // yet exist so that callers can create a link implicitly.
 func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[string]any, force bool) error {
+	_, err := r.putParamset(address, paramsetKey, paramset, force)
+	return err
+}
+
+// putParamset is PutParamset, reporting what a write model did not take
+// as sent.
+func (r *RPCFunctions) putParamset(address, paramsetKey string, paramset map[string]any, force bool) ([]RejectedParameter, error) {
 	// Detect LINK peer-address form.
 	if paramsetKey != hmconst.ParamsetAttrMaster && paramsetKey != hmconst.ParamsetAttrValues &&
 		paramsetKey != hmconst.ParamsetAttrLink {
-		return r.PutLinkParamset(address, paramsetKey, paramset)
+		return nil, r.PutLinkParamset(address, paramsetKey, paramset)
 	}
 	addrUp := strings.ToUpper(address)
 	r.mu.Lock()
@@ -854,14 +891,20 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 	}
 	if desc == nil {
 		r.mu.Unlock()
-		return unknownDevice(address)
+		return nil, unknownDevice(address)
 	}
 	paramDescs, ok := desc[paramsetKey].(map[string]any)
 	if !ok {
 		r.mu.Unlock()
-		return unknownParamset(address, paramsetKey)
+		return nil, unknownParamset(address, paramsetKey)
 	}
 	deviceType := r.deviceTypeForAddressLocked(addrUp)
+	if paramsetKey == hmconst.ParamsetAttrMaster && r.masterModel {
+		if model := masterModelFor(deviceType); model != masterModelNone {
+			// The model takes over the lock and releases it.
+			return r.putMasterModel(model, address, addrUp, paramDescs, paramset)
+		}
+	}
 
 	type firedEvent struct {
 		key   string
@@ -880,14 +923,14 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 		paramData, ok := paramDescs[valueKey].(map[string]any)
 		if !ok {
 			r.mu.Unlock()
-			return fmt.Errorf("%w: parameter %q not described on %q", ErrRPC, valueKey, address)
+			return nil, fmt.Errorf("%w: parameter %q not described on %q", ErrRPC, valueKey, address)
 		}
 		paramType, _ := paramData[hmconst.AttrType].(string)
 
 		ops := readInt(paramData[hmconst.ParamsetAttrOperations])
 		if !force && (ops&hmconst.ParamsetOperationsWrite) == 0 {
 			r.mu.Unlock()
-			return fmt.Errorf("%w: write not allowed for %s on %s", ErrRPC, valueKey, address)
+			return nil, fmt.Errorf("%w: write not allowed for %s on %s", ErrRPC, valueKey, address)
 		}
 
 		if paramType == hmconst.ParamsetTypeAction {
@@ -909,7 +952,7 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 			if hook != nil {
 				hook(address, valueKey, value)
 			}
-			return nil
+			return nil, nil
 		}
 
 		converted := convertParamValue(value, paramType)
@@ -917,7 +960,7 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 		case hmconst.ParamsetTypeEnum:
 			if err := validateEnumBounds(converted, paramData); err != nil {
 				r.mu.Unlock()
-				return invalidValue(address, valueKey, err)
+				return nil, invalidValue(address, valueKey, err)
 			}
 		case hmconst.ParamsetTypeFloat, hmconst.ParamsetTypeInteger:
 			converted = clampNumeric(converted, paramData, paramType)
@@ -976,7 +1019,7 @@ func (r *RPCFunctions) PutParamset(address, paramsetKey string, paramset map[str
 		// CONFIG_PENDING on channel 0.
 		r.notifyConfigPending(address)
 	}
-	return nil
+	return nil, nil
 }
 
 // FireEvent is the public wrapper for fireEvent (used by the device
@@ -996,17 +1039,18 @@ func (r *RPCFunctions) fireEventTo(target, interfaceID, address, valueKey string
 }
 
 // dispatchEvent notifies the in-process callbacks and every registered
-// remote; when target is non-empty only that remote is called.
+// remote; when target is non-empty only the remotes registered under
+// that interface id are called.
 func (r *RPCFunctions) dispatchEvent(target, interfaceID, address, valueKey string, value any) {
 	addrUp := strings.ToUpper(address)
 	r.mu.Lock()
 	cbs := append([]EventCallback(nil), r.paramsetCallbacks...)
-	remotes := make(map[string]remoteCaller, len(r.remotes))
-	for k, v := range r.remotes {
-		if target != "" && k != target {
+	remotes := make([]remoteEntry, 0, len(r.remotes))
+	for _, e := range r.snapshotRemotesLocked() {
+		if target != "" && e.interfaceID != target {
 			continue
 		}
-		remotes[k] = v
+		remotes = append(remotes, e)
 	}
 	batched := r.batchEvents
 	r.mu.Unlock()
@@ -1015,12 +1059,12 @@ func (r *RPCFunctions) dispatchEvent(target, interfaceID, address, valueKey stri
 		safeCallEvent(cb, interfaceID, addrUp, valueKey, value)
 	}
 	if batched {
-		for ifID, client := range remotes {
+		for _, e := range remotes {
 			r.mu.Lock()
-			d := r.dispatcherFor(ifID, client)
+			d := r.dispatcherFor(e.key, e.client)
 			r.mu.Unlock()
 			d.enqueue(pendingEvent{
-				interfaceID: ifID,
+				interfaceID: e.interfaceID,
 				address:     addrUp,
 				valueKey:    valueKey,
 				value:       value,
@@ -1028,7 +1072,8 @@ func (r *RPCFunctions) dispatchEvent(target, interfaceID, address, valueKey stri
 		}
 		return
 	}
-	for ifID, client := range remotes {
+	for _, e := range remotes {
+		ifID, client := e.interfaceID, e.client
 		params := []xmlrpc.Value{
 			xmlrpc.StringValue(ifID),
 			xmlrpc.StringValue(addrUp),
@@ -1044,7 +1089,9 @@ func (r *RPCFunctions) dispatchEvent(target, interfaceID, address, valueKey stri
 			// simulator stricter than both the CCU and pydevccu.
 			if xmlrpc.IsTransport(err) {
 				r.mu.Lock()
-				delete(r.remotes, ifID)
+				if current, ok := r.remotes[e.key]; ok && current.client == client {
+					delete(r.remotes, e.key)
+				}
 				r.mu.Unlock()
 			}
 		}
@@ -1053,20 +1100,41 @@ func (r *RPCFunctions) dispatchEvent(target, interfaceID, address, valueKey stri
 
 // Init registers a callback URL or removes the matching remote when
 // interfaceID is empty.
+//
+// By default a registration is keyed by its interface id and removed by
+// a substring match on the url, as pydevccu does. With
+// [RPCFunctions.EnableInitSemantics] it is keyed by the url exactly, the
+// way the interface processes identify a logic layer; see initsemantics.go.
 func (r *RPCFunctions) Init(url, interfaceID string) string {
+	r.mu.Lock()
+	byURL := r.initSemantics
+	r.mu.Unlock()
 	if interfaceID != "" {
-		client := newRemote(url)
+		key := interfaceID
+		if byURL {
+			key = url
+		}
+		client := r.newRemote(url)
 		r.mu.Lock()
-		r.remotes[interfaceID] = client
+		r.dropDispatcherLocked(key)
+		r.remotes[key] = registration{interfaceID: interfaceID, client: client}
 		r.mu.Unlock()
-		go r.askDevices(interfaceID)
+		go r.askDevices(key)
 		return ""
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for ifID, client := range r.remotes {
-		if strings.Contains(client.URL(), url) || strings.Contains(url, client.URL()) {
-			delete(r.remotes, ifID)
+	if byURL {
+		if _, ok := r.remotes[url]; ok {
+			delete(r.remotes, url)
+			r.dropDispatcherLocked(url)
+		}
+		return ""
+	}
+	for key, reg := range r.remotes {
+		if strings.Contains(reg.client.URL(), url) || strings.Contains(url, reg.client.URL()) {
+			delete(r.remotes, key)
+			r.dropDispatcherLocked(key)
 			break
 		}
 	}
@@ -1075,16 +1143,16 @@ func (r *RPCFunctions) Init(url, interfaceID string) string {
 
 // askDevices queries the remote for its known device list and
 // reconciles it against ours, just like _ask_devices in Python.
-func (r *RPCFunctions) askDevices(interfaceID string) {
+func (r *RPCFunctions) askDevices(key string) {
 	r.mu.Lock()
-	client, ok := r.remotes[interfaceID]
+	reg, ok := r.remotes[key]
 	r.mu.Unlock()
 	if !ok {
 		return
 	}
-	resp, err := client.Call(context.Background(), "listDevices", []xmlrpc.Value{xmlrpc.StringValue(interfaceID)})
+	resp, err := reg.client.Call(context.Background(), "listDevices", []xmlrpc.Value{xmlrpc.StringValue(reg.interfaceID)})
 	if err != nil {
-		r.logger.Debug("ccu: listDevices on remote failed", "interface", interfaceID, "err", err)
+		r.logger.Debug("ccu: listDevices on remote failed", "interface", reg.interfaceID, "err", err)
 		return
 	}
 	known := make([]map[string]any, 0)
@@ -1097,22 +1165,23 @@ func (r *RPCFunctions) askDevices(interfaceID string) {
 	}
 	r.mu.Lock()
 	r.knownDevices = known
+	semantics := r.initSemantics
 	r.mu.Unlock()
-	r.pushDevices(interfaceID)
+	if semantics {
+		r.reconcileDevices(reg, known)
+		return
+	}
+	r.pushDevices(reg, known)
 }
 
 // pushDevices sends newDevices/deleteDevices for the diff between our
 // catalogue and the client's known set.
-func (r *RPCFunctions) pushDevices(interfaceID string) {
+func (r *RPCFunctions) pushDevices(reg registration, known []map[string]any) {
+	interfaceID, client := reg.interfaceID, reg.client
 	r.mu.Lock()
-	client, ok := r.remotes[interfaceID]
-	if !ok {
-		r.mu.Unlock()
-		return
-	}
-	knownAddresses := make(map[string]struct{}, len(r.knownDevices))
+	knownAddresses := make(map[string]struct{}, len(known))
 	var deleteList []string
-	for _, d := range r.knownDevices {
+	for _, d := range known {
 		addr, _ := d[hmconst.AttrAddress].(string)
 		if _, ok := r.paramsetDescByAddr[addr]; !ok {
 			deleteList = append(deleteList, addr)
@@ -1153,8 +1222,12 @@ func (r *RPCFunctions) pushDevices(interfaceID string) {
 func (r *RPCFunctions) ClientServerInitialized(interfaceID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, ok := r.remotes[interfaceID]
-	return ok
+	for _, reg := range r.remotes {
+		if reg.interfaceID == interfaceID {
+			return true
+		}
+	}
+	return false
 }
 
 // PutLinkParamset stores LINK paramset values for the (sender, peer) pair.
@@ -1182,6 +1255,11 @@ func (r *RPCFunctions) PutLinkParamset(senderAddress, peerAddress string, params
 
 // GetMetadata returns the requested metadata field.
 func (r *RPCFunctions) GetMetadata(objectID, dataID string) (any, error) {
+	if family := r.quirkFamily(); family != "" {
+		if v, err, handled := r.quirkGetMetadata(family, objectID, dataID); handled {
+			return v, err
+		}
+	}
 	addr := strings.ToUpper(objectID)
 	if i := strings.IndexByte(addr, ':'); i >= 0 {
 		addr = addr[:i]
@@ -1415,6 +1493,7 @@ func (r *RPCFunctions) GetLinkPeers(channelAddress string) []string {
 // currently ignored (mirrors the real CCU behaviour for the simulator context).
 func (r *RPCFunctions) GetLinks(channelAddress string, _ int) []any {
 	addrUp := strings.ToUpper(channelAddress)
+	family := r.quirkFamily()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make([]any, 0)
@@ -1430,6 +1509,9 @@ func (r *RPCFunctions) GetLinks(channelAddress string, _ int) []any {
 		}
 		for k, v := range vals {
 			desc[k] = v
+		}
+		if family != "" {
+			desc[attrFlags] = linkFlags(family, addrUp == "", lk)
 		}
 		out = append(out, desc)
 	}

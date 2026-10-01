@@ -62,31 +62,7 @@ func (r *RPCFunctions) ServiceStates() []ServiceState {
 	if !r.serviceMessages {
 		return nil
 	}
-	var out []ServiceState
-	for address, paramsets := range r.paramsets {
-		if !strings.HasSuffix(address, ":0") {
-			continue
-		}
-		values, ok := paramsets[hmconst.ParamsetAttrValues]
-		if !ok {
-			continue
-		}
-		for _, parameter := range serviceParameters {
-			value, present := values[parameter]
-			if !present || !isRaised(value) {
-				continue
-			}
-			if r.isSuppressedLocked(address, parameter) {
-				continue
-			}
-			out = append(out, ServiceState{
-				Address:   address,
-				Parameter: parameter,
-				Value:     value,
-			})
-		}
-	}
-	return out
+	return r.deriveServiceStatesLocked()
 }
 
 // isRaised reports whether a maintenance value constitutes a message: a
