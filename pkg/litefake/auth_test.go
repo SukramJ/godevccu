@@ -85,8 +85,11 @@ func TestFakeLoginSessionAndLogout(t *testing.T) {
 		User  string `json:"user"`
 		Level string `json:"level"`
 	}](t, string(raw))
-	if resp.StatusCode != http.StatusOK || len(login.SID) != 26 || login.User != "admin" || login.Level != "administer" {
+	if resp.StatusCode != http.StatusOK || login.User != "admin" || login.Level != "administer" {
 		t.Fatalf("login: %d %s", resp.StatusCode, raw)
+	}
+	if !isSessionIDShape(login.SID) {
+		t.Errorf("session id %q is not 26 characters of A-Z2-7", login.SID)
 	}
 	if resp, _ := get(t, f, "/api/rpc/v1/interfaces", login.SID); resp.StatusCode != http.StatusOK {
 		t.Errorf("session on lite-rpc: %d", resp.StatusCode)
@@ -137,7 +140,7 @@ func TestFakeAuthOffStateAnswersEveryCaller(t *testing.T) {
 		bearer string
 	}{
 		{"no credential", ""},
-		{"unknown 26-char bearer", "abcdefghijklmnopqrstuvwxyz"},
+		{"unknown 26-char bearer", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
 		{"valid token", operateToken},
 		{"valid session", login.SID},
 	}
@@ -207,12 +210,44 @@ func TestFakeAuthOffOptionOverridesPlaceholders(t *testing.T) {
 	f := startFake(t, litefake.Options{
 		AuthOff:        true,
 		AuthOffAccount: litefake.Account{Username: "anon", AccountID: "42", Role: "user", Level: "read"},
-		AuthOffSID:     "abcdefghijklmnopqrstuvwxyz",
+		AuthOffSID:     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
 	})
 	_, body := get(t, f, "/api/auth/v1/state", "")
-	for _, want := range []string{`"user":"anon"`, `"account_id":"42"`, `"sid":"abcdefghijklmnopqrstuvwxyz"`, `"role":"admin"`, `"level":"administer"`, `"auth_off":true`} {
+	for _, want := range []string{`"user":"anon"`, `"account_id":"42"`, `"sid":"ABCDEFGHIJKLMNOPQRSTUVWXYZ"`, `"role":"admin"`, `"level":"administer"`, `"auth_off":true`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("state lacks %s: %s", want, body)
 		}
+	}
+}
+
+// isSessionIDShape reports whether s has the box's session id shape:
+// 26 characters of uppercase A-Z2-7 (CONTRACT.md §A.2).
+func isSessionIDShape(s string) bool {
+	if len(s) != 26 {
+		return false
+	}
+	for _, c := range s {
+		if (c < 'A' || c > 'Z') && (c < '2' || c > '7') {
+			return false
+		}
+	}
+	return true
+}
+
+// TestFakeSessionIDShapeHoldsAcrossLogins pins the minted id shape over
+// many logins, so a lowercase or padded id cannot slip through by luck.
+func TestFakeSessionIDShapeHoldsAcrossLogins(t *testing.T) {
+	f := startFake(t, litefake.Options{Accounts: []litefake.Account{{Username: "u", Password: "p"}}})
+	for range 32 {
+		_, raw := send(t, f, http.MethodPost, "/api/auth/v1/login", "", `{"username":"u","password":"p"}`)
+		sid := decode[struct {
+			SID string `json:"sid"`
+		}](t, string(raw)).SID
+		if !isSessionIDShape(sid) {
+			t.Fatalf("session id %q is not 26 characters of A-Z2-7", sid)
+		}
+	}
+	if !isSessionIDShape(litefake.DefaultAuthOffSID) {
+		t.Errorf("DefaultAuthOffSID %q is not 26 characters of A-Z2-7", litefake.DefaultAuthOffSID)
 	}
 }

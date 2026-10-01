@@ -37,7 +37,8 @@ Use this appendix as the contract; do not consult occulited source.
 ### A.2 Authentication, tokens, scopes
 
 - Credentials (first valid wins): cookie session; `Authorization: Bearer <x>` (API token
-  `olt_<32 lowercase hex>` or a 26-char base32 session id); **Basic auth whose password is an API
+  `olt_<32 lowercase hex>` or a session id of 26 characters of uppercase `A-Z2-7` *(doc: openccu-lite
+  docs/PORTING-PROMPT.md)*); **Basic auth whose password is an API
   token** (user name ignored); `?sid=` (refused on lite-rpc: `400 bad-request "credentials are not
   accepted in the query string here: use the Authorization header"`). The 10-char legacy alias is never
   accepted.

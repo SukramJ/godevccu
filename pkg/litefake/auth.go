@@ -226,9 +226,9 @@ const (
 
 // DefaultAuthOffSID is the session id auth mode off reports unless
 // [Options.AuthOffSID] names another. It is a litefake placeholder in the
-// 26-character base32 shape of a session id: the contract does not fix
+// shape of a session id (26 characters of uppercase A-Z2-7): the contract does not fix
 // the real box's value, so a test must not treat it as one.
-const DefaultAuthOffSID = "litefakeauthoffsession2222"
+const DefaultAuthOffSID = "LITEFAKEAUTHOFFSESSION2222"
 
 // authOffMethod is the login method auth mode off reports. The contract
 // does not fix it; it is a litefake placeholder.
@@ -331,11 +331,12 @@ type session struct {
 	account Account
 }
 
-// newSessionID returns a 26-character base32 session id.
+// newSessionID returns a session id of 26 characters of uppercase
+// A-Z2-7, the standard base32 alphabet without padding (CONTRACT.md §A.2).
 func newSessionID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
-	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b[:]))
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b[:])
 }
 
 // loginRequest is the body of POST /api/auth/v1/login.
