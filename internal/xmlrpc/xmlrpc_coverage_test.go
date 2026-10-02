@@ -419,13 +419,13 @@ func TestMuxConcurrentDispatch(t *testing.T) {
 
 	const goroutines = 20
 	done := make(chan struct{}, goroutines)
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(n int) {
 			_, _ = m.Dispatch(context.Background(), "echo", []xmlrpc.Value{xmlrpc.IntValue(int32(n))}) //nolint:gosec
 			done <- struct{}{}
 		}(i)
 	}
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		<-done
 	}
 }

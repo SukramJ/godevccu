@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -79,10 +80,8 @@ func hasScope(stored []string, want string) bool {
 		if s == scopeAll || s == want {
 			return true
 		}
-		for _, imp := range implied(s) {
-			if imp == want {
-				return true
-			}
+		if slices.Contains(implied(s), want) {
+			return true
 		}
 	}
 	return false
@@ -256,19 +255,15 @@ func DefaultAuthOffAccount() Account {
 func (f *Fake) authOffState() authStateOff {
 	a := f.opts.AuthOffAccount
 	return authStateOff{
-		authStateSession: authStateSession{
-			authStateToken: authStateToken{
-				Authenticated: true,
-				User:          a.Username,
-				Scopes:        append([]string{}, a.Scopes...),
-			},
-			Role:      authOffRole,
-			Level:     authOffLevel,
-			AccountID: a.AccountID,
-			SID:       f.opts.AuthOffSID,
-			Method:    authOffMethod,
-		},
-		AuthOff: true,
+		Authenticated: true,
+		User:          a.Username,
+		Scopes:        append([]string{}, a.Scopes...),
+		Role:          authOffRole,
+		Level:         authOffLevel,
+		AccountID:     a.AccountID,
+		SID:           f.opts.AuthOffSID,
+		Method:        authOffMethod,
+		AuthOff:       true,
 	}
 }
 

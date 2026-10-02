@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"time"
 
@@ -242,9 +243,9 @@ func (v *VirtualCCU) rpcForAddress(address string) (*ccu.RPCFunctions, error) {
 	if len(all) == 0 {
 		return nil, errNotRunning
 	}
-	for i := len(all) - 1; i >= 0; i-- {
-		if _, err := all[i].GetDeviceDescription(address); err == nil {
-			return all[i], nil
+	for _, a := range slices.Backward(all) {
+		if _, err := a.GetDeviceDescription(address); err == nil {
+			return a, nil
 		}
 	}
 	return nil, fmt.Errorf("virtualccu: no interface serves %q", address)

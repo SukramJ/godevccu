@@ -547,20 +547,14 @@ func substr(s string, args []Value) string {
 	if len(args) == 0 {
 		return s
 	}
-	offset := int(args[0].Number())
-	if offset < 0 {
-		offset = 0
-	}
+	offset := max(int(args[0].Number()), 0)
 	if offset >= len(s) {
 		return ""
 	}
 	if len(args) < 2 {
 		return s[offset:]
 	}
-	end := offset + int(args[1].Number())
-	if end > len(s) {
-		end = len(s)
-	}
+	end := min(offset+int(args[1].Number()), len(s))
 	if end <= offset {
 		return ""
 	}

@@ -198,8 +198,7 @@ func (f *Fake) handleXMLRPC(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := forward(r.Context(), st.daemonURL, call)
 	if err != nil {
-		var local *localError
-		if errors.As(err, &local) {
+		if local, ok := errors.AsType[*localError](err); ok {
 			writeFault(w, -1, local.Error())
 			return
 		}
@@ -395,13 +394,13 @@ func rewriteMarks(latin1 []byte) []byte {
 		}
 		out.Write(latin1[:i])
 		rest := latin1[i+len(open):]
-		j := bytes.Index(rest, closeMark)
-		if j < 0 {
+		before, after, ok := bytes.Cut(rest, closeMark)
+		if !ok {
 			out.Write(latin1[i:])
 			return out.Bytes()
 		}
-		out.WriteString("&#" + string(rest[:j]) + ";")
-		latin1 = rest[j+len(closeMark):]
+		out.WriteString("&#" + string(before) + ";")
+		latin1 = after
 	}
 }
 

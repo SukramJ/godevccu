@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"os"
 	"strings"
@@ -301,9 +302,7 @@ func (r *RPCFunctions) SupportedDevices() map[string]string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make(map[string]string, len(r.supportedDevices))
-	for k, v := range r.supportedDevices {
-		out[k] = v
-	}
+	maps.Copy(out, r.supportedDevices)
 	return out
 }
 
@@ -349,9 +348,7 @@ func (r *RPCFunctions) loadDevices(restrict []string) ([]map[string]any, error) 
 				r.deviceByAddress[strings.ToUpper(addr)] = d
 			}
 		}
-		for addr, ps := range s.paramsetByAddr {
-			r.paramsetDescByAddr[addr] = ps
-		}
+		maps.Copy(r.paramsetDescByAddr, s.paramsetByAddr)
 		if s.rootDeviceAddr != "" {
 			r.supportedDevices[s.deviceTypeKey] = s.rootDeviceAddr
 		}
@@ -763,9 +760,7 @@ func (r *RPCFunctions) GetParamset(address, paramsetKey string) (map[string]any,
 	result := cloneStringMap(defaults)
 	if overrides, ok := r.paramsets[addrUp]; ok {
 		if ps, ok := overrides[paramsetKey]; ok {
-			for k, v := range ps {
-				result[k] = v
-			}
+			maps.Copy(result, ps)
 		}
 	}
 	r.paramsetCompiled[key] = cloneStringMap(result)
@@ -1245,9 +1240,7 @@ func (r *RPCFunctions) PutLinkParamset(senderAddress, peerAddress string, params
 		existing = make(map[string]any, len(paramset))
 		r.linkParamsets[lk] = existing
 	}
-	for k, v := range paramset {
-		existing[k] = v
-	}
+	maps.Copy(existing, paramset)
 	return nil
 }
 
@@ -1317,9 +1310,7 @@ func (r *RPCFunctions) GetAllMetadata(objectID string) map[string]any {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make(map[string]any)
-	for k, v := range r.metadata[strings.ToUpper(objectID)] {
-		out[k] = v
-	}
+	maps.Copy(out, r.metadata[strings.ToUpper(objectID)])
 	return out
 }
 
@@ -1507,9 +1498,7 @@ func (r *RPCFunctions) GetLinks(channelAddress string, _ int) []any {
 			"NAME":        "",
 			"DESCRIPTION": "",
 		}
-		for k, v := range vals {
-			desc[k] = v
-		}
+		maps.Copy(desc, vals)
 		if family != "" {
 			desc[attrFlags] = linkFlags(family, addrUp == "", lk)
 		}
@@ -1570,9 +1559,7 @@ func psKey(address, kind string) paramsetKey {
 
 func cloneStringMap(in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 

@@ -308,8 +308,7 @@ func (s *Server) processOne(ctx context.Context, raw []byte) map[string]any {
 		return nil
 	}
 	if err != nil {
-		var jrErr *Error
-		if errors.As(err, &jrErr) {
+		if jrErr, ok := errors.AsType[*Error](err); ok {
 			return s.failure(req.ID, jrErr)
 		}
 		return s.failure(req.ID, ErrInternal(err.Error()))

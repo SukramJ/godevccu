@@ -5,6 +5,7 @@ package ccu
 
 import (
 	"errors"
+	"maps"
 	"math"
 	"reflect"
 	"regexp"
@@ -125,9 +126,7 @@ func (r *RPCFunctions) PoisonedChannels() []string {
 func (r *RPCFunctions) putMasterModel(model masterModelKind, address, addrUp string, descs, set map[string]any) ([]RejectedParameter, error) {
 	stored := r.masterOverridesLocked(addrUp)
 	current := buildDefaults(descs)
-	for k, v := range stored {
-		current[k] = v
-	}
+	maps.Copy(current, stored)
 	names := make([]string, 0, len(set))
 	for name := range set {
 		names = append(names, name)

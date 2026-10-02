@@ -653,8 +653,7 @@ func (s *Server) faultFromErr(err error) error {
 	if err == nil {
 		return nil
 	}
-	var fault *xmlrpc.Fault
-	if errors.As(err, &fault) {
+	if fault, ok := errors.AsType[*xmlrpc.Fault](err); ok {
 		return fault
 	}
 	s.mu.Lock()

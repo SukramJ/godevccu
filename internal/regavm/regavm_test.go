@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -79,8 +80,8 @@ func (f *fakeSource) DeviceField(address, field string) (any, bool) {
 func (f *fakeSource) Datapoints(channel string) []string {
 	var out []string
 	for key := range f.values {
-		if strings.HasPrefix(key, channel+".") {
-			out = append(out, strings.TrimPrefix(key, channel+"."))
+		if after, ok := strings.CutPrefix(key, channel+"."); ok {
+			out = append(out, after)
 		}
 	}
 	return out
@@ -169,10 +170,8 @@ func (f *fakeSource) Resolve(key string) (regavm.NodeKind, string, bool) {
 		return regavm.NodeDevice, key, true
 	}
 	for _, channels := range f.devices {
-		for _, channel := range channels {
-			if channel == key {
-				return regavm.NodeChannel, key, true
-			}
+		if slices.Contains(channels, key) {
+			return regavm.NodeChannel, key, true
 		}
 	}
 	if _, ok := f.programs[key]; ok {

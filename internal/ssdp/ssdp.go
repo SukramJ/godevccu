@@ -259,7 +259,7 @@ func (r *Responder) usn(st string) string {
 // may be quoted, as M-SEARCH's MAN header is.
 func headerValue(message, name string) string {
 	prefix := strings.ToLower(name) + ":"
-	for _, line := range strings.Split(message, "\r\n") {
+	for line := range strings.SplitSeq(message, "\r\n") {
 		if !strings.HasPrefix(strings.ToLower(line), prefix) {
 			continue
 		}

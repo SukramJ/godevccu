@@ -94,8 +94,8 @@ func (r *RPCFunctions) setMaintenanceValue(channel, parameter string, value any)
 // to — the channel a CCU reports device-level state on.
 func maintenanceChannel(address string) string {
 	root := address
-	if i := strings.IndexByte(address, ':'); i >= 0 {
-		root = address[:i]
+	if before, _, ok := strings.Cut(address, ":"); ok {
+		root = before
 	}
 	return root + ":0"
 }

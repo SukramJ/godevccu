@@ -7,6 +7,8 @@
 package godevccu
 
 import (
+	"maps"
+
 	"github.com/SukramJ/godevccu/internal/ccu"
 	"github.com/SukramJ/godevccu/internal/devicelogic"
 	"github.com/SukramJ/godevccu/internal/hmconst"
@@ -84,9 +86,7 @@ const PortRegaScript = virtualccu.PortRegaScript
 // ready to be passed as [Config.InterfacePorts].
 func DefaultInterfacePorts() map[string]int {
 	out := make(map[string]int, len(hmconst.DefaultInterfacePorts))
-	for name, port := range hmconst.DefaultInterfacePorts {
-		out[name] = port
-	}
+	maps.Copy(out, hmconst.DefaultInterfacePorts)
 	return out
 }
 

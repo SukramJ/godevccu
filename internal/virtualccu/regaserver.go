@@ -45,10 +45,7 @@ func (v *VirtualCCU) startRegaScript() error {
 	if port == 0 {
 		return nil
 	}
-	bindPort := port
-	if bindPort < 0 {
-		bindPort = 0
-	}
+	bindPort := max(port, 0)
 
 	interpreter := v.newInterpreter()
 	mux := http.NewServeMux()

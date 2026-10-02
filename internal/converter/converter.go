@@ -44,7 +44,7 @@ func ConvertCombinedParameterToParamset(parameter, value string) map[string]any 
 // convertCombinedParameter parses keys of the form "L=0x12,L2=0x34".
 func convertCombinedParameter(cpv string) map[string]any {
 	out := map[string]any{}
-	for _, pair := range strings.Split(cpv, ",") {
+	for pair := range strings.SplitSeq(cpv, ",") {
 		eq := strings.IndexByte(pair, '=')
 		if eq <= 0 {
 			continue

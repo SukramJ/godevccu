@@ -108,8 +108,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func asFault(err error) *Fault {
-	var fault *Fault
-	if errors.As(err, &fault) {
+	if fault, ok := errors.AsType[*Fault](err); ok {
 		return fault
 	}
 	return &Fault{Code: -1, Message: err.Error()}
