@@ -1,3 +1,3 @@
 module github.com/SukramJ/godevccu
 
-go 1.26
+go 1.27

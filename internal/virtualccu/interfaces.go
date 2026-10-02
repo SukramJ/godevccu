@@ -69,10 +69,7 @@ func (v *VirtualCCU) startInterface(name string, port int, version string) (*int
 	if port == 0 {
 		port = hmconst.DefaultInterfacePorts[name]
 	}
-	bindPort := port
-	if bindPort < 0 {
-		bindPort = 0
-	}
+	bindPort := max(port, 0)
 
 	rpcFns, err := ccu.NewRPCFunctions(ccu.Options{
 		Devices:         v.cfg.Devices,

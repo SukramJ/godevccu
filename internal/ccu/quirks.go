@@ -151,8 +151,8 @@ func linkFlags(family string, unfiltered bool, lk linkKey) int {
 
 // deviceOf returns the device part of a channel address.
 func deviceOf(address string) string {
-	if i := strings.IndexByte(address, ':'); i >= 0 {
-		return address[:i]
+	if before, _, ok := strings.Cut(address, ":"); ok {
+		return before
 	}
 	return address
 }

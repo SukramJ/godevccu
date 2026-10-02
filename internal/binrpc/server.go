@@ -93,11 +93,9 @@ func (s *Server) Serve(ctx context.Context) error {
 			_ = conn.Close()
 			continue
 		}
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			s.handleConn(ctx, conn)
-		}()
+		})
 	}
 }
 

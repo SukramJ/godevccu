@@ -54,13 +54,11 @@ func (s *Server) StartBINRPC(addr string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.binrpc.srv = srv
 	s.binrpc.cancel = cancel
-	s.binrpc.wg.Add(1)
-	go func() {
-		defer s.binrpc.wg.Done()
+	s.binrpc.wg.Go(func() {
 		if serveErr := srv.Serve(ctx); serveErr != nil {
 			s.logger.Error("ccu: bin-rpc serve stopped", "err", serveErr)
 		}
-	}()
+	})
 	return nil
 }
 

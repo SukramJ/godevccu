@@ -23,8 +23,6 @@ type Interpreter struct {
 	// Root resolves the top-level namespaces: dom, system, interfaces
 	// and the like.
 	Root Root
-	// Now supplies the clock, so tests can pin timestamps.
-	Now func() time.Time
 	// Exec answers system.Exec() calls. Returning ok=false makes the
 	// call report failure to the script, which is what a CCU does for a
 	// command that is not available.
@@ -462,9 +460,6 @@ func (in *Interpreter) evalSystem(node *memberExpr, sc *scope) (Value, error) {
 // evalTime handles localtime.Format and friends.
 func (in *Interpreter) evalTime(method string, args []Value) Value {
 	now := time.Now
-	if in.Now != nil {
-		now = in.Now
-	}
 	switch method {
 	case "Format":
 		layout := "%F %T"
@@ -547,20 +542,14 @@ func substr(s string, args []Value) string {
 	if len(args) == 0 {
 		return s
 	}
-	offset := int(args[0].Number())
-	if offset < 0 {
-		offset = 0
-	}
+	offset := max(int(args[0].Number()), 0)
 	if offset >= len(s) {
 		return ""
 	}
 	if len(args) < 2 {
 		return s[offset:]
 	}
-	end := offset + int(args[1].Number())
-	if end > len(s) {
-		end = len(s)
-	}
+	end := min(offset+int(args[1].Number()), len(s))
 	if end <= offset {
 		return ""
 	}

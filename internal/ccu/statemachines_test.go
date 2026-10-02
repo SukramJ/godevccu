@@ -279,7 +279,7 @@ func TestBatchedEventsUseMulticall(t *testing.T) {
 	rpc.Init(remote.srv.URL, interfaceID)
 	time.Sleep(150 * time.Millisecond)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		rpc.FireEvent(interfaceID, "VCU0000001:1", "STATE", i%2 == 0)
 	}
 

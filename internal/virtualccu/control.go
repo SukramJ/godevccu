@@ -233,8 +233,7 @@ func (v *VirtualCCU) ControlHandler() http.Handler {
 
 func writeControlFault(w http.ResponseWriter, err error) {
 	code := -1
-	var fault *xmlrpc.Fault
-	if errors.As(err, &fault) {
+	if fault, ok := errors.AsType[*xmlrpc.Fault](err); ok {
 		code = fault.Code
 	}
 	writeControlJSON(w, http.StatusBadRequest, map[string]any{"faultCode": code, "faultString": err.Error()})

@@ -493,8 +493,7 @@ func (f *Fake) handlePairingApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := f.ApprovePairing(r.PathValue("id"), body.Code); err != nil {
-		var pe *PairingError
-		if errors.As(err, &pe) {
+		if pe, ok := errors.AsType[*PairingError](err); ok {
 			writeError(w, pe.Status, pe.Code, pe.Message)
 			return
 		}

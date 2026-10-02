@@ -181,11 +181,10 @@ func (e *Engine) handleFetchDeviceData(script string) string {
 	values := e.state.AllDeviceValues(iface)
 	out := make(map[string]any, len(values))
 	for key, val := range values {
-		idx := strings.LastIndex(key, ":")
-		if idx <= 0 || idx == len(key)-1 {
+		address, param, ok := strings.CutLast(key, ":")
+		if !ok || address == "" || param == "" {
 			continue
 		}
-		address, param := key[:idx], key[idx+1:]
 		name := address + "." + param
 		if iface != "" {
 			name = iface + "." + name

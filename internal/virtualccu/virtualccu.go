@@ -358,10 +358,7 @@ func (v *VirtualCCU) Start() error {
 	// transport. EphemeralPort (<0) becomes 0 so the OS assigns one, and
 	// the resolved number is written back like XMLRPCPort's.
 	if v.cfg.BINRPCPort != 0 {
-		bindPort := v.cfg.BINRPCPort
-		if bindPort < 0 {
-			bindPort = 0
-		}
+		bindPort := max(v.cfg.BINRPCPort, 0)
 		if err := v.xmlrpc.StartBINRPC(net.JoinHostPort(v.cfg.Host, strconv.Itoa(bindPort))); err != nil {
 			_ = v.xmlrpc.Stop()
 			return fmt.Errorf("virtualccu: bin-rpc start: %w", err)

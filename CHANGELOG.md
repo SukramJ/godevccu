@@ -9,6 +9,13 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Changed
+
+- **Requires Go 1.27.** `go.mod` targets Go 1.27 and CI builds with it;
+  a consumer module has to be on Go 1.27 or newer. golangci-lint is now
+  installed from source in CI, because the prebuilt binary is built with
+  an older Go and refuses a module that targets a newer one.
+
 ### Fixed
 
 - **litefake: a refused login answers like the box.** `POST /api/auth/v1/login`

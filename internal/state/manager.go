@@ -6,6 +6,8 @@ package state
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -410,10 +412,8 @@ func (m *Manager) AddChannelToRoom(roomID int, channelID string) bool {
 	if !ok {
 		return false
 	}
-	for _, c := range r.ChannelIDs {
-		if c == channelID {
-			return true
-		}
+	if slices.Contains(r.ChannelIDs, channelID) {
+		return true
 	}
 	r.ChannelIDs = append(r.ChannelIDs, channelID)
 	return true
@@ -483,10 +483,8 @@ func (m *Manager) AddChannelToFunction(functionID int, channelID string) bool {
 	if !ok {
 		return false
 	}
-	for _, c := range f.ChannelIDs {
-		if c == channelID {
-			return true
-		}
+	if slices.Contains(f.ChannelIDs, channelID) {
+		return true
 	}
 	f.ChannelIDs = append(f.ChannelIDs, channelID)
 	return true
@@ -729,9 +727,7 @@ func (m *Manager) AllDeviceValues(_ string) map[string]any {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make(map[string]any, len(m.deviceValues))
-	for k, v := range m.deviceValues {
-		out[k] = v
-	}
+	maps.Copy(out, m.deviceValues)
 	return out
 }
 
@@ -766,9 +762,7 @@ func (m *Manager) AllDeviceNames() map[string]string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make(map[string]string, len(m.deviceNames))
-	for k, v := range m.deviceNames {
-		out[k] = v
-	}
+	maps.Copy(out, m.deviceNames)
 	return out
 }
 

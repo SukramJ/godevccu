@@ -36,7 +36,7 @@ func parseFilter(q url.Values) filter {
 		out := map[string]struct{}{}
 		for _, n := range names {
 			for _, raw := range q[n] {
-				for _, v := range strings.Split(raw, ",") {
+				for v := range strings.SplitSeq(raw, ",") {
 					if v = strings.TrimSpace(v); v != "" {
 						out[v] = struct{}{}
 					}
@@ -177,8 +177,7 @@ func (f *Fake) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	rd, res, err := f.ring.attach(who.subject, lastID, hasResume)
 	if err != nil {
-		var lim *limitError
-		if errors.As(err, &lim) {
+		if lim, ok := errors.AsType[*limitError](err); ok {
 			code := "too-many-streams"
 			if f.deviates(DeviateStreamLimitCode) {
 				code = "rate-limited"

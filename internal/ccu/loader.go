@@ -73,9 +73,9 @@ func loadAllDevices(restrict []string, normalize bool) ([]loadedDeviceSet, error
 			return fmt.Errorf("paramset descriptions %s: %w", path, err)
 		}
 
-		set := loadedDeviceSet{deviceTypeKey: devName}
-		set.devices = devs
-		set.paramsetByAddr = make(map[string]map[string]any, len(ps))
+		set := loadedDeviceSet{deviceTypeKey: devName,
+			devices:        devs,
+			paramsetByAddr: make(map[string]map[string]any, len(ps))}
 		for addr, raw := range ps {
 			obj, ok := raw.(map[string]any)
 			if !ok {

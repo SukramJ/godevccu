@@ -546,19 +546,19 @@ func (h *Handlers) interfaceOf(d map[string]any) string {
 
 // parentAddress strips the channel suffix from an address.
 func parentAddress(address string) string {
-	if i := strings.IndexByte(address, ':'); i >= 0 {
-		return address[:i]
+	if before, _, ok := strings.Cut(address, ":"); ok {
+		return before
 	}
 	return address
 }
 
 // channelIndex is the number behind the colon, or 0.
 func channelIndex(address string) int {
-	i := strings.IndexByte(address, ':')
-	if i < 0 {
+	_, after, ok := strings.Cut(address, ":")
+	if !ok {
 		return 0
 	}
-	n, err := strconv.Atoi(address[i+1:])
+	n, err := strconv.Atoi(after)
 	if err != nil {
 		return 0
 	}
