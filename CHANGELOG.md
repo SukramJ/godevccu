@@ -9,6 +9,8 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-02
+
 ### Changed
 
 - **Requires Go 1.27.** `go.mod` targets Go 1.27 and CI builds with it;
@@ -709,7 +711,8 @@ Initial release. A standalone Go port of
   and `3.87.1.20250130` in CCU/OpenCCU mode — identical to upstream
   pydevccu so clients that branch on the prefix keep working.
 
-[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/SukramJ/godevccu/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/SukramJ/godevccu/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/SukramJ/godevccu/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/SukramJ/godevccu/compare/v0.3.0...v0.4.0
