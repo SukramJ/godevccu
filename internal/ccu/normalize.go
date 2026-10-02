@@ -11,11 +11,11 @@ import (
 
 // Load-time data normalisation.
 //
-// The embedded catalogue is imported verbatim from pydevccu, and
-// CLAUDE.md forbids editing it in place — script/copy_data.sh would
-// overwrite any correction on the next import. So the gaps are closed
-// while loading instead, which leaves the fixtures untouched and keeps
-// the correction reviewable in one place.
+// The embedded catalogue was originally imported verbatim from pydevccu
+// (archived). Its catalogue-wide gaps are closed while loading instead
+// of in the files: the default data stays what clients test against,
+// a device added later gets the same treatment, and the correction
+// stays reviewable in one place.
 //
 // What is off, measured across the embedded set:
 //

@@ -119,7 +119,7 @@ func TestXMLRPCGetVersionCCUMode(t *testing.T) {
 }
 
 func TestXMLRPCGetVersionHomegearMode(t *testing.T) {
-	// In Homegear mode getVersion must report "pydevccu-<VERSION>"
+	// In Homegear mode getVersion must report "godevccu-<Version>"
 	// so aiohomematic (and other clients that branch on the prefix)
 	// recognise the simulator.
 	v, err := virtualccu.New(virtualccu.Config{
@@ -143,7 +143,7 @@ func TestXMLRPCGetVersionHomegearMode(t *testing.T) {
 	}
 
 	got := callGetVersion(t, v)
-	want := "pydevccu-" + hmconst.PydevccuVersion
+	want := "godevccu-" + hmconst.Version
 	if got != want {
 		t.Fatalf("getVersion (homegear) = %q, want %q", got, want)
 	}

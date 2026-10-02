@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2026 godevccu authors.
 
-// Package embed exposes the device and paramset description JSON files
-// shipped from pydevccu. The files are embedded at build time so that
-// the resulting binary is self-contained.
+// Package embed exposes the device and paramset description JSON files.
+// They are maintained in this repository and embedded at build time so
+// that the resulting binary is self-contained.
 //
-// To refresh the data set, run script/copy_data.sh and rebuild.
+// Add or update a device by placing device_descriptions/<TYPE>.json and
+// paramset_descriptions/<TYPE>.json under data/ — the format of the ZIP
+// that Homematic(IP) Local's export_device_definition action writes —
+// and rebuild.
 package embed
 
 import (

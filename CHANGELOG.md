@@ -9,6 +9,26 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+godevccu is now the reference implementation and maintains its own
+device data. pydevccu is archived; no behaviour or data is taken from
+it any more.
+
+### Changed
+
+- **BREAKING:** Homegear-mode `getVersion` reports `godevccu-<version>`
+  instead of `pydevccu-0.2.0`, and `hmconst.PydevccuVersion` is removed.
+  Clients that detect the simulator by the `pydevccu` substring must
+  look for `godevccu`.
+- Documentation describes godevccu as the reference implementation;
+  pydevccu is only named as the origin of existing behaviour.
+
+### Removed
+
+- `make data` and `script/copy_data.sh`: the device and paramset
+  descriptions in `internal/embed/data/` are maintained in this
+  repository. Add a device in the format of Homematic(IP) Local's
+  `export_device_definition` ZIP.
+
 ## [0.7.0] — 2026-10-02
 
 ### Changed

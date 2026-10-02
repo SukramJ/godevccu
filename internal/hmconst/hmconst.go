@@ -10,13 +10,6 @@ package hmconst
 // Version of the godevccu package itself.
 const Version = "0.7.0"
 
-// PydevccuVersion is the upstream pydevccu version godevccu emulates
-// for wire-level compatibility. The string is returned by getVersion
-// in Homegear mode (`pydevccu-<PydevccuVersion>`) so clients that
-// branch on the value (for example aiohomematic) recognise the
-// simulator.
-const PydevccuVersion = "0.2.0"
-
 // BackendMode selects the simulation flavour.
 type BackendMode int
 

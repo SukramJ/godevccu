@@ -36,6 +36,3 @@ go.work.sum
 # Persistence files written at runtime
 paramsets_db.json
 
-# Local copies of pydevccu data (the embedded canonical set lives in
-# internal/embed/data and IS checked in)
-/data/
