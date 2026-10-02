@@ -10,7 +10,7 @@ permissions:
 
 env:
   CGO_ENABLED: "0"
-  GO_VERSION: "1.27"
+  GO_VERSION: "1.27.1"
 
 jobs:
   meta:
