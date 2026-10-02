@@ -9,6 +9,11 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Changed
+
+- **Requires Go 1.27.1.** `go.mod` targets Go 1.27.1 and CI and release
+  builds use it, the same patch release openccu-loom builds with.
+
 ## [0.8.0] — 2026-10-02
 
 godevccu is now the reference implementation and maintains its own
