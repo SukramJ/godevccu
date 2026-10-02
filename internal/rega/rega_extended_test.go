@@ -218,6 +218,26 @@ func TestFetchDeviceDataByInterfaceAssign(t *testing.T) {
 	}
 }
 
+// TestFetchDeviceDataSkipsKeysWithAnEmptySide pins the split of a cached
+// "<address>:<parameter>" key on its last colon: a key whose address or
+// parameter side is empty names no datapoint and must not be emitted.
+func TestFetchDeviceDataSkipsKeysWithAnEmptySide(t *testing.T) {
+	st, e := newEngine(t)
+	st.SetDeviceValue("VCU1234:1", "STATE", true)
+	st.SetDeviceValue("", "STATE", true)      // key ":STATE"
+	st.SetDeviceValue("VCU1234:2", "", false) // key "VCU1234:2:"
+
+	res := e.Execute(`!# name: fetch_all_device_data.fn`)
+	if !res.Success {
+		t.Fatalf("execute failed: %s", res.Error)
+	}
+	var got map[string]any
+	decodeJSON(t, res.Output, &got)
+	if len(got) != 1 {
+		t.Fatalf("emitted %d datapoints %v, want only VCU1234:1.STATE", len(got), got)
+	}
+}
+
 func TestFetchDeviceDataByParamHeader(t *testing.T) {
 	st, e := newEngine(t)
 	st.SetDeviceValue("VCU5678:2", "LEVEL", 0.5)
