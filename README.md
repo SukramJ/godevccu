@@ -1,6 +1,6 @@
 # godevccu
 
-`godevccu` is a virtual HomeMatic CCU exposed as XML-RPC and JSON-RPC servers, written in Go — a standalone port of [pydevccu](https://github.com/sukramj/pydevccu).
+`godevccu` is a virtual HomeMatic CCU exposed as XML-RPC and JSON-RPC servers, written in Go.
 
 It is designed for development and automated testing of Home Assistant and aiohomematic/gohomematic integrations without requiring real hardware.
 
@@ -11,7 +11,7 @@ It is designed for development and automated testing of Home Assistant and aioho
 - **VirtualCCU orchestrator**: bundles XML-RPC, JSON-RPC, the ReGa engine, session management and the state manager.
 - **ReGa script engine** (pattern-based) — compatible with the scripts shipped by `aiohomematic/gohomematic`.
 - **Session authentication** in CCU/OpenCCU format.
-- **397 device types** embedded from pydevccu (via `//go:embed`).
+- **399 device types** embedded via `//go:embed`.
 - **Four backend modes**: `HOMEGEAR`, `CCU`, `OPENCCU` and `LITE` — a fake openccu-lite box.
 - **Built-in device behaviour simulators** for HM-Sec-SC-2 and HM-Sen-MDIR-WM55.
 - **Scenario API for failure testing** — inject faults, delays, hangs and closed connections, stop/restart individual interface processes, read back every client write and every callback (`InjectFault`, `RestartInterface`, `WriteLog`, `CallbackLog`), also over HTTP via `-control-port`. Modelled on [hm-simulator](https://github.com/hobbyquaker/hm-simulator), see [Acknowledgements](#acknowledgements).
@@ -107,7 +107,7 @@ internal/
 cmd/godevccu/         CLI
 ```
 
-The device definitions (`device_descriptions/*.json`, `paramset_descriptions/*.json`) live under `internal/embed/data/` and are refreshed by `script/copy_data.sh` from `pydevccu/pydevccu/`.
+The device definitions (`device_descriptions/*.json`, `paramset_descriptions/*.json`) live under `internal/embed/data/` and are maintained in this repository. Add or update a device by placing `device_descriptions/<TYPE>.json` and `paramset_descriptions/<TYPE>.json` there — the format of the ZIP that Homematic(IP) Local's `export_device_definition` action writes — and rebuild.
 
 ## Build
 
@@ -116,13 +116,6 @@ make build       # binary into bin/
 make test        # all tests
 make cover       # coverage report into coverage.html
 make lint        # golangci-lint
-make data        # copy device JSONs from ../pydevccu
-```
-
-The default path to the pydevccu source is `../pydevccu`. `PYDEVCCU=` overrides it:
-
-```bash
-make data PYDEVCCU=/path/to/pydevccu
 ```
 
 ## Tests
@@ -158,4 +151,4 @@ lists every behaviour with its source. Thank you!
 
 MIT — see [`LICENSE`](LICENSE). See [`NOTICE`](NOTICE) for attribution.
 
-`godevccu` is a port of [pydevccu](https://github.com/sukramj/pydevccu) by Daniel Perna and SukramJ. The embedded device and paramset descriptions originate from pydevccu and were initially extracted from HomeMatic firmware XML. The eQ-3 license terms (non-commercial) apply to that data.
+`godevccu` started as a port of [pydevccu](https://github.com/sukramj/pydevccu) (archived) by Daniel Perna and SukramJ. The embedded device and paramset descriptions originate from pydevccu and were initially extracted from HomeMatic firmware XML. The eQ-3 license terms (non-commercial) apply to that data.

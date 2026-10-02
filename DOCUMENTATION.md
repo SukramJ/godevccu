@@ -1,9 +1,10 @@
 # godevccu — Detailed Documentation
 
-`godevccu` is a Go port of [pydevccu](https://github.com/sukramj/pydevccu).
-The public API in `pkg/godevccu` covers the same use cases as the
-Python original — from a pure XML-RPC server (Homegear mode) to a full
-CCU/OpenCCU simulation with the JSON-RPC web API.
+`godevccu` is a virtual HomeMatic CCU in Go. It started as a port of
+[pydevccu](https://github.com/sukramj/pydevccu), which is archived;
+godevccu is now the reference implementation. The public API in
+`pkg/godevccu` covers everything from a pure XML-RPC server (Homegear
+mode) to a full CCU/OpenCCU simulation with the JSON-RPC web API.
 
 ---
 
@@ -30,8 +31,9 @@ CCU/OpenCCU simulation with the JSON-RPC web API.
 
 ## Realism (opt-in)
 
-pydevccu parity is a contract, so every behaviour where a real CCU
-differs from pydevccu sits behind `Config.Realism`. The zero value
+The default behaviour is a contract that clients test against, so
+every behaviour where a real CCU differs from it sits behind
+`Config.Realism`. The zero value
 reproduces the established behaviour bit for bit; `godevccu.RealismCCU()`
 switches everything on (except `ServiceMessagesFault`, see below).
 
@@ -51,7 +53,7 @@ switches everything on (except `ServiceMessagesFault`, see below).
 | `Ramps` | An actuator move reports a travelling `ACTIVITY_STATE` first and the idle state after the travel time. The value itself still lands immediately. |
 | `FaultCodes` | The HomeMatic fault catalogue (−2 unknown device, −3 unknown paramset, −5 unknown parameter or invalid value) instead of answering everything with −1, which clients read as "retryable". |
 | `NormalizeData` | Completes the embedded descriptions while loading: missing parameter `ID`s, `UNIT: null` (which serialises as `<nil/>`), mistyped BOOL defaults, empty firmware fields. The fixtures stay untouched. |
-| `InitSemantics` | `init()` as the interface processes handle it: a registration is keyed by its url exactly (pydevccu keys by interface id and removes by substring, so `init("http://h:1", "")` also removes `http://h:10`), `deleteDevices` precedes `newDevices`, a device in another `VERSION` is sent again, HmIP devices are sent again on every init. |
+| `InitSemantics` | `init()` as the interface processes handle it: a registration is keyed by its url exactly (the default keys by interface id and removes by substring, so `init("http://h:1", "")` also removes `http://h:10`), `deleteDevices` precedes `newDevices`, a device in another `VERSION` is sent again, HmIP devices are sent again on every init. |
 | `MasterModel` | MASTER writes answered with rfd's and hmipserver's models, chosen per device by protocol family — see [MASTER write models](#master-write-models). |
 | `InterfaceQuirks` | Per-process answers: no PONG from hmipserver, `getServiceMessages` derived from the maintenance channels with rfd's `""` for "nothing pending", `SENDER_BROKEN` on rfd's unfiltered `getLinks`, rfd's `-1 Failure` for unset metadata. Only with `InterfacePorts`. |
 | `ServiceMessagesFault` | `getServiceMessages` on HmIP-RF and VirtualDevices answers `-1 Invalid XML-RPC message`. **Not** part of `RealismCCU()`: it was observed on some 3.89.x systems only. |
@@ -323,8 +325,7 @@ Important methods:
 - `RPC() *ccu.RPCFunctions` — direct access to the XML-RPC methods.
 - `State() *state.Manager`, `Session() *session.Manager`.
 
-Unlike pydevccu, the Go implementation does not use `async with` —
-lifecycle management is handled with `Start`/`Stop` plus `defer`.
+Lifecycle management is handled with `Start`/`Stop` plus `defer`.
 
 ---
 
@@ -431,7 +432,7 @@ get the bare `true` and no event.
 
 A callback receiver is only deregistered on a *transport* error. A
 fault is the client answering, so it stays registered and keeps
-receiving events — matching both the CCU and pydevccu.
+receiving events — matching the CCU.
 
 While `Config.StartNotReady` is in effect the XML-RPC surface answers
 `503 CCU not ready yet`, not just the JSON-RPC web API: a booting CCU
@@ -446,8 +447,7 @@ refuses every remote API port.
 exclusively. It reuses `xmlrpc.Value`, since BIN-RPC carries the same
 value set and differs only in framing.
 
-**This is a deliberate extension beyond pydevccu parity.** pydevccu has
-neither BIN-RPC nor CUxD. The transport exists because the CUxD callback
+**This is a deliberate, opt-in extension of the default behaviour.** The transport exists because the CUxD callback
 direction is otherwise untestable without real hardware.
 
 Enable it with `Config.BINRPCPort` (0 disables it, `EphemeralPort` binds
@@ -542,29 +542,22 @@ JSON payload:
 - generic `Write("…")`
 
 Unknown scripts return empty `Output` strings (with `Success=true`).
-This keeps the Go implementation behaviourally identical to pydevccu.
 
 ---
 
 ## Device definitions
 
-The JSON files from
-`pydevccu/pydevccu/{device_descriptions,paramset_descriptions}/` are
-copied via `script/copy_data.sh` into `internal/embed/data/` and
-embedded into the binary at build time via `//go:embed all:data/...`.
+The device and paramset descriptions live in
+`internal/embed/data/{device_descriptions,paramset_descriptions}/` and
+are maintained in this repository. They are embedded into the binary
+at build time via `//go:embed all:data/...`.
 
-```bash
-# import data from ../pydevccu
-./script/copy_data.sh
+Add or update a device by placing `device_descriptions/<TYPE>.json`
+and `paramset_descriptions/<TYPE>.json` there — the format of the ZIP
+that Homematic(IP) Local's `export_device_definition` action writes —
+and rebuild.
 
-# or with an explicit path
-./script/copy_data.sh /path/to/pydevccu/pydevccu
-
-# alternatively via Make
-make data PYDEVCCU=/path/to/pydevccu
-```
-
-397 device types are currently available (HM Wired, HM Wireless,
+399 device types are currently available (HM Wired, HM Wireless,
 HmIP).
 
 ---
@@ -600,7 +593,7 @@ type Config struct {
     Username      string           // Default: "Admin"
     Password      string
     AuthEnabled   bool
-    Devices       []string         // nil = all 397 device types
+    Devices       []string         // nil = all 399 device types
     Persistence   bool
     Serial        string           // Default: "GODEVCCU0001"
     SetupDefaults bool             // pre-populate programs/sysvars/rooms
@@ -648,15 +641,6 @@ jsonAddr := v.JSONRPCAddr().String()
 for callback pushes. External test clients (such as
 aiohomematic/gohomematic) can talk to the server using any XML-RPC
 library.
-
-### Refresh data from pydevccu and rebuild
-
-```bash
-git -C ../pydevccu pull
-make data
-make test
-make build
-```
 
 ### Docker / OCI
 

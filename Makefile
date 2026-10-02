@@ -20,8 +20,6 @@ BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w
 GO_BUILD_FLAGS := -trimpath -ldflags="$(LDFLAGS)"
 
-PYDEVCCU ?= ../pydevccu
-
 .PHONY: help
 help: ## show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -31,10 +29,6 @@ setup: ## install developer tooling
 	$(GO) install mvdan.cc/gofumpt@latest
 	$(GO) install golang.org/x/tools/cmd/goimports@latest
 	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-
-.PHONY: data
-data: ## copy device/paramset descriptions from pydevccu (PYDEVCCU=..)
-	./script/copy_data.sh $(PYDEVCCU)/pydevccu
 
 .PHONY: tidy
 tidy: ## go mod tidy

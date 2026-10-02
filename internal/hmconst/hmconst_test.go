@@ -50,9 +50,6 @@ func TestVersionConstants(t *testing.T) {
 	if hmconst.Version == "" {
 		t.Error("Version must not be empty")
 	}
-	if hmconst.PydevccuVersion == "" {
-		t.Error("PydevccuVersion must not be empty")
-	}
 	if hmconst.CCUFirmwareVersion == "" {
 		t.Error("CCUFirmwareVersion must not be empty")
 	}

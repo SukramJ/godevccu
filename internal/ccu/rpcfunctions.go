@@ -172,9 +172,8 @@ type Options struct {
 	// Defaults to [hmconst.ParamsetsDB] in the working directory.
 	PersistencePath string
 	// Version is the string returned by getVersion. When empty, it
-	// defaults to "pydevccu-<PydevccuVersion>" (Homegear-mode), which
-	// matches what upstream pydevccu reports. CCU/OpenCCU callers
-	// override this with the real CCU firmware version.
+	// defaults to "godevccu-<Version>" (Homegear mode). CCU/OpenCCU
+	// callers override this with the real CCU firmware version.
 	Version string
 	// InterfaceID is the identifier the simulator reports to remote
 	// callbacks; defaults to "godevccu".
@@ -214,11 +213,9 @@ func NewRPCFunctions(opts Options) (*RPCFunctions, error) {
 	}
 	version := opts.Version
 	if version == "" {
-		// Mirror pydevccu: Homegear-mode getVersion returns
-		// "pydevccu-<VERSION>" so clients that detect pydevccu by
-		// string-prefix (for example aiohomematic) treat us as the
-		// upstream simulator.
-		version = "pydevccu-" + hmconst.PydevccuVersion
+		// Homegear mode identifies the simulator by name, so clients
+		// (for example aiohomematic) can detect it from getVersion.
+		version = "godevccu-" + hmconst.Version
 	}
 	ifID := opts.InterfaceID
 	if ifID == "" {

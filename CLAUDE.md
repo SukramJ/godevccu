@@ -1,33 +1,34 @@
 # CLAUDE.md
 
 This document targets AI assistants (Claude Code & friends) working on
-`godevccu`. It is intentionally compact — the source of design truth is
-the comparison with [`pydevccu`](https://github.com/sukramj/pydevccu)
-(reference repository under `../pydevccu`).
+`godevccu`. It is intentionally compact. godevccu is the reference
+implementation: behaviour is decided here. It started as a port of
+[`pydevccu`](https://github.com/sukramj/pydevccu), which is archived and
+no longer a source of behaviour or data.
 
 ---
 
 ## Project overview
 
-`godevccu` is a port of the virtual HomeMatic CCU (`pydevccu`) to Go.
+`godevccu` is a virtual HomeMatic CCU in Go.
 Goals:
 
-1. **Identical wire-level behaviour** to `pydevccu` over both XML-RPC
-   and JSON-RPC. Tests in either repo should produce the same answers.
-   `internal/binrpc` is the one deliberate exception: pydevccu has no
-   BIN-RPC and no CUxD, so that transport models real CUxD instead —
-   including its `system.multicall` callback envelope. Keep it opt-in
-   (`Config.BINRPCPort`) so a default run stays pydevccu-shaped.
+1. **Stable default wire-level behaviour** over both XML-RPC and
+   JSON-RPC. Clients (aiohomematic, gohomematic, openccu-loom) test
+   against the default run; change it only deliberately and say so in
+   the CHANGELOG. `internal/binrpc` is one deliberate extension: it
+   models real CUxD over BIN-RPC — including its `system.multicall`
+   callback envelope. Keep it opt-in (`Config.BINRPCPort`) so a default
+   run is unchanged.
    `pkg/litefake` is the second deliberate exception: a fake
    openccu-lite box (occulited's HTTP API — token auth, XML-RPC proxy
    with init refusal and method tiers, SSE event stream, metadata,
    system, pairing) composed on top of per-interface simulator
-   listeners. pydevccu has no counterpart. It is written from the
+   listeners. It is written from the
    condensed wire contract in `pkg/litefake/CONTRACT.md` and from
    nothing else — occulited is GPL-3.0, so no source, fixture or
    algorithm is ever copied or translated from it. Keep it opt-in too
-   (`litefake.Start`, CLI `-mode lite`): a default run stays
-   pydevccu-shaped.
+   (`litefake.Start`, CLI `-mode lite`): a default run is unchanged.
 2. **Single static binary** (`CGO_ENABLED=0`). No platform-specific
    build steps.
 3. **Embedded device definitions** (via `//go:embed`) — no runtime
@@ -47,8 +48,12 @@ Goals:
   specification).
 - **Addresses** are processed **case-insensitively** but stored in
   upper case.
-- **Device descriptions** must not be modified directly in the repo —
-  they are imported via `script/copy_data.sh` from `pydevccu/pydevccu/`.
+- **Device descriptions** live in `internal/embed/data/` and are
+  maintained here. Add a device with `device_descriptions/<TYPE>.json`
+  and `paramset_descriptions/<TYPE>.json` (the format of Homematic(IP)
+  Local's `export_device_definition` ZIP). Catalogue-wide corrections
+  belong in the load-time normalisation (`internal/ccu/normalize.go`),
+  not in individual files.
 - **Public API** lives in `pkg/godevccu/` and `pkg/litefake/`.
   Everything else lives under `internal/` and is excluded from the API
   stability promise. `pkg/litefake` mirrors a pre-1.0 wire contract
@@ -60,7 +65,6 @@ Goals:
 make build      # builds bin/godevccu
 make test       # go test -race -cover ./...
 make lint       # golangci-lint
-make data       # copies device definitions from ../pydevccu
 make cover      # HTML coverage report
 ```
 
@@ -72,9 +76,10 @@ go test ./internal/state/ -run TestPrograms -v
 
 ## Architecture
 
-The packages mirror the pydevccu modules:
+The packages originate from these pydevccu modules (archived; the
+mapping only explains where existing behaviour came from):
 
-| godevccu                       | pydevccu                          |
+| godevccu                       | origin in pydevccu                |
 |--------------------------------|-----------------------------------|
 | `internal/hmconst`             | `pydevccu/const.py`               |
 | `internal/xmlrpc`              | `xmlrpc.server` / `xmlrpc.client` |
@@ -109,15 +114,15 @@ The packages mirror the pydevccu modules:
 
 ## Implementation policy
 
-- **Do not improvise** where pydevccu returns deterministic values.
-  For example, `getServiceMessages` in the Go port also returns the
+- **Do not change deterministic values** that clients rely on.
+  For example, `getServiceMessages` returns the
   hard-coded `[["VCU0000001:1","ERROR",7]]` because existing
   integration tests expect that exact shape.
 - **JSON-RPC response envelope** is `1.1` (not `2.0`) —
   aiohomematic/gohomematic check both `result` and `error` fields even
   on success.
-- **Session IDs** are extracted using the same rules as pydevccu
-  (top-level, in `params`, stringified dict).
+- **Session IDs** are extracted from the top level, from `params` or
+  from a stringified dict.
 - **Device behaviour simulators** are opt-in (`Config.EnableLogic`).
   They exist purely for deterministic test scenarios and are not meant
   to emulate realistic device behaviour.
@@ -145,15 +150,6 @@ The packages mirror the pydevccu modules:
 2. Add an entry to `Registry` in `devicelogic.go`.
 3. Add a test in `internal/devicelogic/`.
 
-## Working with pydevccu
-
-- pydevccu lives under `../pydevccu`. When in doubt about how a
-  behaviour should manifest, look there — the Python code is the
-  ground truth.
-- `pydevccu/CLAUDE.md` contains a compact pydevccu architecture
-  overview — read it first before diving into individual Python
-  modules.
-
 ## Working with hm-simulator
 
 - [hm-simulator](https://github.com/hobbyquaker/hm-simulator) (Sebastian
@@ -163,4 +159,4 @@ The packages mirror the pydevccu modules:
   `ServiceMessagesFault`. Its README says per behaviour whether it was
   measured on a CCU or is a model — carry that distinction over, and
   credit hm-simulator in the doc comment of anything taken from it.
-- These behaviours stay opt-in: the default run is pydevccu-shaped.
+- These behaviours stay opt-in: the default run is unchanged.

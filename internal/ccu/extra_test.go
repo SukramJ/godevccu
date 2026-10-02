@@ -275,7 +275,7 @@ func TestDefaultVersionIsHomegear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRPCFunctions: %v", err)
 	}
-	want := "pydevccu-" + hmconst.PydevccuVersion
+	want := "godevccu-" + hmconst.Version
 	if got := rpc.Version(); got != want {
 		t.Fatalf("default Version() = %q, want %q", got, want)
 	}
