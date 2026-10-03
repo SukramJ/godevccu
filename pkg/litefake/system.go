@@ -142,8 +142,8 @@ type LastBackup struct {
 	Error string `json:"error,omitempty"`
 }
 
-func newSystemState() *systemState {
-	return &systemState{uploads: map[string][]byte{}, groups: newGroupStore()}
+func newSystemState(groupCandidates map[string][]GroupMember) *systemState {
+	return &systemState{uploads: map[string][]byte{}, groups: newGroupStore(groupCandidates)}
 }
 
 func (f *Fake) systemRoutes(mux *http.ServeMux) {

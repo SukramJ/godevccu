@@ -30,14 +30,34 @@ type Group struct {
 	ForbidSingleOperation bool     `json:"-"`
 }
 
-// groupStore holds the groups.
-type groupStore struct {
-	mu     sync.Mutex
-	next   int
-	groups map[int]*Group
+// GroupMember is a channel as the groups API names it: a candidate of a
+// group type, a member of a group, a device still to configure. A box
+// answers the channel address as id and as serial, and the channel type.
+type GroupMember struct {
+	ID     string `json:"id"`
+	Serial string `json:"serial"`
+	Type   string `json:"type"`
 }
 
-func newGroupStore() *groupStore { return &groupStore{groups: map[int]*Group{}} }
+// groupStore holds the groups and, per group type, the channels that
+// type can take. The fake does not derive candidates from its devices:
+// which channels a type takes is the box's group service's decision,
+// which the contract does not describe, so a test seeds them
+// ([Options.GroupCandidates]).
+type groupStore struct {
+	mu         sync.Mutex
+	next       int
+	groups     map[int]*Group
+	candidates map[string][]GroupMember
+}
+
+func newGroupStore(candidates map[string][]GroupMember) *groupStore {
+	c := make(map[string][]GroupMember, len(candidates))
+	for typeID, members := range candidates {
+		c[typeID] = append([]GroupMember{}, members...)
+	}
+	return &groupStore{groups: map[int]*Group{}, candidates: c}
+}
 
 // groupID reads the {id} path segment; a segment that is not a number
 // names no group.
@@ -46,11 +66,12 @@ func groupID(r *http.Request) (int, bool) {
 	return id, err == nil
 }
 
-// groupTypes are the group types the fake offers.
+// groupTypes are the group types the fake offers, with the labels a box
+// answers for them.
 func groupTypes() map[string]string {
 	return map[string]string{
-		"HomeMatic.heating":  "Heating group (HomeMatic)",
-		"hmip.heating.group": "Heating group (HomeMatic IP)",
+		"HomeMatic.heating":  "Heating_Control",
+		"hmip.heating.group": "HmIP-Heizungssteuerung",
 	}
 }
 
@@ -63,16 +84,9 @@ func (f *Fake) groupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/system/v1/groups/{id}", f.sysScope(scopeSystemWrite, f.handleGroupDelete))
 }
 
-// deviceToConfigure is a member device that still needs configuring.
-type deviceToConfigure struct {
-	ID     string `json:"id"`
-	Serial string `json:"serial"`
-	Type   string `json:"type"`
-}
-
 type groupsAnswer struct {
-	Groups             []Group             `json:"groups"`
-	DevicesToConfigure []deviceToConfigure `json:"devices_to_configure"`
+	Groups             []Group       `json:"groups"`
+	DevicesToConfigure []GroupMember `json:"devices_to_configure"`
 }
 
 func (s *groupStore) list() []Group {
@@ -87,81 +101,186 @@ func (s *groupStore) list() []Group {
 }
 
 func (f *Fake) handleGroups(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, groupsAnswer{Groups: f.system.groups.list(), DevicesToConfigure: []deviceToConfigure{}})
+	writeJSON(w, http.StatusOK, groupsAnswer{Groups: f.system.groups.list(), DevicesToConfigure: []GroupMember{}})
 }
 
-// groupCandidate is a channel a group type can take, as a box lists it:
-// the channel address as id and serial, and the channel type.
-type groupCandidate struct {
-	ID     string `json:"id"`
-	Serial string `json:"serial"`
-	Type   string `json:"type"`
+// member resolves a member id of a group type to the channel the box names
+// for it; false for an id that type cannot take. Callers hold s.mu.
+func (s *groupStore) member(typeID, id string) (GroupMember, bool) {
+	for _, c := range s.candidates[typeID] {
+		if c.ID == id {
+			return c, true
+		}
+	}
+	return GroupMember{}, false
+}
+
+// members are a group's members as the box answers them. Callers hold
+// s.mu.
+func (s *groupStore) members(g *Group) []GroupMember {
+	out := make([]GroupMember, 0, len(g.Members))
+	for _, id := range g.Members {
+		if m, ok := s.member(g.Type, id); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// split sorts a type's candidates the way a box does: a channel that
+// belongs to a group of that type is leftover, the rest are assignable.
+// The members of the group named by own appear in neither list — that
+// group's detail shows them as members. Observed on a box for groups of
+// one type; a box with candidates for two types was not at hand, so a
+// membership in a group of another type is not counted. Callers hold
+// s.mu.
+func (s *groupStore) split(typeID string, own *Group) (assignable, leftover []GroupMember) {
+	taken := map[string]bool{}
+	mine := map[string]bool{}
+	for _, g := range s.groups {
+		if g.Type != typeID {
+			continue
+		}
+		for _, id := range g.Members {
+			if g == own {
+				mine[id] = true
+			} else {
+				taken[id] = true
+			}
+		}
+	}
+	assignable, leftover = []GroupMember{}, []GroupMember{}
+	for _, c := range s.candidates[typeID] {
+		switch {
+		case mine[c.ID]:
+		case taken[c.ID]:
+			leftover = append(leftover, c)
+		default:
+			assignable = append(assignable, c)
+		}
+	}
+	return assignable, leftover
 }
 
 type groupType struct {
-	ID         string           `json:"id"`
-	Label      string           `json:"label"`
-	Assignable []groupCandidate `json:"assignable"`
-	Leftover   []groupCandidate `json:"leftover"`
+	ID         string        `json:"id"`
+	Label      string        `json:"label"`
+	Assignable []GroupMember `json:"assignable"`
+	Leftover   []GroupMember `json:"leftover"`
 }
 
-func (f *Fake) handleGroupTypes(w http.ResponseWriter, _ *http.Request) {
+// sortedGroupTypeIDs are the offered type ids in the order a box lists
+// them.
+func sortedGroupTypeIDs() []string {
 	types := groupTypes()
 	ids := make([]string, 0, len(types))
 	for id := range types {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	out := make([]groupType, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, groupType{ID: id, Label: types[id], Assignable: []groupCandidate{}, Leftover: []groupCandidate{}})
+	return ids
+}
+
+func (f *Fake) handleGroupTypes(w http.ResponseWriter, _ *http.Request) {
+	types := groupTypes()
+	s := f.system.groups
+	s.mu.Lock()
+	out := make([]groupType, 0, len(types))
+	for _, id := range sortedGroupTypeIDs() {
+		assignable, leftover := s.split(id, nil)
+		out = append(out, groupType{ID: id, Label: types[id], Assignable: assignable, Leftover: leftover})
 	}
+	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, struct {
 		Types []groupType `json:"types"`
 	}{Types: out})
 }
 
-// groupDetail is the GET /groups/{id} answer.
+// groupTypeRef is a group type as a group's detail lists the offered
+// ones: id and label, without candidates.
+type groupTypeRef struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// groupDetail is one group as the box answers it on GET /groups/{id} and
+// after a create or an update. Unlike the list entry it carries no
+// type_label; Types are all offered types, not the group's own.
 type groupDetail struct {
-	Group
-	DeviceName            string           `json:"device_name"`
-	ForbidSingleOperation bool             `json:"forbid_single_operation"`
-	Members               []string         `json:"members"`
-	Assignable            []groupCandidate `json:"assignable"`
-	Leftover              []groupCandidate `json:"leftover"`
-	Types                 []string         `json:"types"`
+	ID                    int            `json:"id"`
+	Name                  string         `json:"name"`
+	Type                  string         `json:"type"`
+	Device                string         `json:"device"`
+	Ref                   string         `json:"ref"`
+	DeviceName            string         `json:"device_name"`
+	ForbidSingleOperation bool           `json:"forbid_single_operation"`
+	Members               []GroupMember  `json:"members"`
+	Assignable            []GroupMember  `json:"assignable"`
+	Leftover              []GroupMember  `json:"leftover"`
+	Types                 []groupTypeRef `json:"types"`
 }
 
-func detailOf(g Group) groupDetail {
+// detailOf renders a stored group. Callers hold s.mu.
+func (s *groupStore) detailOf(g *Group) groupDetail {
+	assignable, leftover := s.split(g.Type, g)
+	types := groupTypes()
+	refs := make([]groupTypeRef, 0, len(types))
+	for _, id := range sortedGroupTypeIDs() {
+		refs = append(refs, groupTypeRef{ID: id, Label: types[id]})
+	}
 	return groupDetail{
-		Group:                 g,
-		DeviceName:            g.Name,
+		ID: g.ID, Name: g.Name, Type: g.Type, Device: g.Device, Ref: g.Ref,
+		// A box names the group device after the group and its address.
+		DeviceName:            g.Name + " " + g.Device,
 		ForbidSingleOperation: g.ForbidSingleOperation,
-		Members:               append([]string{}, g.Members...),
-		Assignable:            []groupCandidate{},
-		Leftover:              []groupCandidate{},
-		Types:                 []string{g.Type},
+		Members:               s.members(g),
+		Assignable:            assignable,
+		Leftover:              leftover,
+		Types:                 refs,
 	}
 }
 
-func (s *groupStore) get(id int) (Group, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	g, ok := s.groups[id]
-	if !ok {
-		return Group{}, false
+// groupWritten is the answer to a create and to an update: the detail,
+// and the group's members as the devices whose configuration is pending.
+type groupWritten struct {
+	groupDetail
+	DevicesToConfigure []GroupMember `json:"devices_to_configure"`
+}
+
+// writtenOf renders the answer to a write. Callers hold s.mu.
+func (s *groupStore) writtenOf(g *Group) groupWritten {
+	d := s.detailOf(g)
+	return groupWritten{groupDetail: d, DevicesToConfigure: append([]GroupMember{}, d.Members...)}
+}
+
+// take keeps the member ids the group's type can take, in the order
+// given. A box drops any other id without an error: the write answers
+// 200 and the group simply does not hold it. Callers hold s.mu.
+func (s *groupStore) take(typeID string, ids []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := s.member(typeID, id); ok {
+			out = append(out, id)
+		}
 	}
-	return *g, true
+	return out
 }
 
 func (f *Fake) handleGroup(w http.ResponseWriter, r *http.Request) {
 	id, ok := groupID(r)
-	g, found := f.system.groups.get(id)
+	s := f.system.groups
+	s.mu.Lock()
+	g, found := s.groups[id]
+	var d groupDetail
+	if ok && found {
+		d = s.detailOf(g)
+	}
+	s.mu.Unlock()
 	if !ok || !found {
 		writeError(w, http.StatusNotFound, "unknown-group", "no such group")
 		return
 	}
-	writeJSON(w, http.StatusOK, detailOf(g))
+	writeJSON(w, http.StatusOK, d)
 }
 
 // invalidField is the 422 answer naming the offending field.
@@ -186,11 +305,6 @@ type groupBody struct {
 	Type                  string    `json:"type"`
 	Members               *[]string `json:"members"`
 	ForbidSingleOperation *bool     `json:"forbid_single_operation"`
-}
-
-type groupCreated struct {
-	Group
-	DevicesToConfigure []deviceToConfigure `json:"devices_to_configure"`
 }
 
 func decodeGroupBody(w http.ResponseWriter, r *http.Request) (groupBody, bool) {
@@ -230,13 +344,13 @@ func (f *Fake) handleGroupCreate(w http.ResponseWriter, r *http.Request) {
 		Device: device, Ref: "VirtualDevices." + device,
 	}
 	if body.Members != nil {
-		g.Members = append([]string{}, *body.Members...)
+		g.Members = s.take(g.Type, *body.Members)
 	}
 	if body.ForbidSingleOperation != nil {
 		g.ForbidSingleOperation = *body.ForbidSingleOperation
 	}
 	s.groups[id] = g
-	created := groupCreated{Group: *g, DevicesToConfigure: []deviceToConfigure{}}
+	created := s.writtenOf(g)
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, created)
 }
@@ -261,21 +375,21 @@ func (f *Fake) handleGroupUpdate(w http.ResponseWriter, r *http.Request) {
 		g.Name = *body.Name
 	}
 	if body.Members != nil {
-		g.Members = append([]string{}, *body.Members...)
+		g.Members = s.take(g.Type, *body.Members)
 	}
 	if body.ForbidSingleOperation != nil {
 		g.ForbidSingleOperation = *body.ForbidSingleOperation
 	}
-	d := detailOf(*g)
+	d := s.writtenOf(g)
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, d)
 }
 
 // groupDeleted is the DELETE answer; a box answers the deleted group's id
-// as "deleted".
+// as "deleted" and the members the group held.
 type groupDeleted struct {
-	Deleted       int      `json:"deleted"`
-	FormerMembers []string `json:"former_members"`
+	Deleted       int           `json:"deleted"`
+	FormerMembers []GroupMember `json:"former_members"`
 }
 
 func (f *Fake) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
@@ -283,7 +397,9 @@ func (f *Fake) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 	s := f.system.groups
 	s.mu.Lock()
 	g, found := s.groups[id]
+	var former []GroupMember
 	if found {
+		former = s.members(g)
 		delete(s.groups, g.ID)
 	}
 	s.mu.Unlock()
@@ -291,7 +407,7 @@ func (f *Fake) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown-group", "no such group")
 		return
 	}
-	writeJSON(w, http.StatusOK, groupDeleted{Deleted: g.ID, FormerMembers: append([]string{}, g.Members...)})
+	writeJSON(w, http.StatusOK, groupDeleted{Deleted: g.ID, FormerMembers: former})
 }
 
 // Groups returns the groups the fake holds.
