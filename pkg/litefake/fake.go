@@ -110,6 +110,11 @@ type Options struct {
 	// MetaLog the number of events kept for ?since= replay.
 	MetaQueue int
 	MetaLog   int
+	// GroupCandidates are the channels each heating-group type can take,
+	// by group type id ("hmip.heating.group", "HomeMatic.heating"). Nil
+	// means no type has a candidate; a group then keeps no member, because
+	// a box drops a member its type cannot take.
+	GroupCandidates map[string][]GroupMember
 	// Accounts are the user accounts that can log in.
 	Accounts []Account
 	// AuthOff starts the box in auth mode off (see [Fake.SetAuthOff]).
@@ -241,7 +246,7 @@ func Start(ctx context.Context, opts Options) (*Fake, error) {
 	}
 	f.meta = newMetaStore(opts.Meta, opts.MetaLog, opts.MetaQueue)
 	f.pairing = newPairingState(opts)
-	f.system = newSystemState()
+	f.system = newSystemState(opts.GroupCandidates)
 	f.metaHeartbeat = opts.MetaHeartbeatInterval
 	f.sessions = map[string]*session{}
 	f.setTokens(opts.Tokens)

@@ -134,33 +134,112 @@ func TestSystemUpdateStagesAndInstalls(t *testing.T) {
 	}
 }
 
-// TestSystemGroupsLifecycle pins group create/read/update/delete, the
-// name rule and unknown-group.
+// groupCandidates are two channels the HmIP heating-group type can take,
+// in the shape a box lists them (channel address as id and as serial).
+func groupCandidates() map[string][]litefake.GroupMember {
+	return map[string][]litefake.GroupMember{"hmip.heating.group": {
+		{ID: "0000000000AA01:1", Serial: "0000000000AA01:1", Type: "SENSOR_WINDOW"},
+		{ID: "0000000000BB02:9", Serial: "0000000000BB02:9", Type: "SWITCH_ACTUATOR"},
+	}}
+}
+
+// TestSystemGroupsLifecycle pins group create/read/update/delete against
+// the answers an openccu-lite box gave (1.0.0-dev, read and written on
+// 2026-10-03; names and addresses neutralised): members, candidates and
+// former members are objects, a write answers the detail plus the members
+// as devices to configure, and the detail carries the group device's name
+// and every offered type.
 func TestSystemGroupsLifecycle(t *testing.T) {
-	f := startSystemFake(t)
+	f := startFake(t, litefake.Options{GroupCandidates: groupCandidates()})
 	tok := litefake.DefaultToken
-	resp, raw := send(t, f, http.MethodPost, "/api/system/v1/groups", tok, `{"name":"Heizung EG","type":"hmip.heating.group","members":["VCU2128127"]}`)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"ref":"VirtualDevices.INT0000001"`) ||
-		!strings.Contains(string(raw), `"devices_to_configure":[]`) {
+	const (
+		window = `{"id":"0000000000AA01:1","serial":"0000000000AA01:1","type":"SENSOR_WINDOW"}`
+		relay  = `{"id":"0000000000BB02:9","serial":"0000000000BB02:9","type":"SWITCH_ACTUATOR"}`
+		types  = `"types":[{"id":"HomeMatic.heating","label":"Heating_Control"},{"id":"hmip.heating.group","label":"HmIP-Heizungssteuerung"}]`
+	)
+	has := func(step string, raw []byte, parts ...string) {
+		t.Helper()
+		for _, p := range parts {
+			if !strings.Contains(string(raw), p) {
+				t.Errorf("%s: answer lacks %s\n%s", step, p, raw)
+			}
+		}
+	}
+
+	resp, raw := send(t, f, http.MethodPost, "/api/system/v1/groups", tok, `{"name":"Heizung EG","type":"hmip.heating.group","members":["0000000000AA01:1"]}`)
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create: %d %s", resp.StatusCode, raw)
+	}
+	has("create", raw,
+		`"device":"INT0000001"`, `"ref":"VirtualDevices.INT0000001"`, `"device_name":"Heizung EG INT0000001"`,
+		`"members":[`+window+`]`, `"devices_to_configure":[`+window+`]`,
+		`"assignable":[`+relay+`]`, `"leftover":[]`, types)
+	if strings.Contains(string(raw), "type_label") {
+		t.Errorf("create: a box answers no type_label on a group's detail\n%s", raw)
 	}
 	id := strconv.Itoa(decode[struct {
 		ID int `json:"id"`
 	}](t, string(raw)).ID)
+
+	// A member of a group is leftover for the type, and for another group
+	// of that type; the list names no device to configure.
+	if _, raw := get(t, f, "/api/system/v1/groups/types", tok); true {
+		has("types", raw, `"id":"hmip.heating.group","label":"HmIP-Heizungssteuerung","assignable":[`+relay+`],"leftover":[`+window+`]`,
+			`"id":"HomeMatic.heating","label":"Heating_Control","assignable":[],"leftover":[]`)
+	}
+	if _, raw := get(t, f, "/api/system/v1/groups", tok); true {
+		has("list", raw, `"type_label":"HmIP-Heizungssteuerung"`, `"devices_to_configure":[]`)
+	}
+
 	if resp, raw := send(t, f, http.MethodPost, "/api/system/v1/groups", tok, `{"name":"a\nb","type":"hmip.heating.group"}`); resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(raw), `"field":"name"`) {
 		t.Errorf("two-line name: %d %s", resp.StatusCode, raw)
 	}
-	if resp, raw := send(t, f, http.MethodPut, "/api/system/v1/groups/"+id, tok, `{"members":["A","B"]}`); resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"members":["A","B"]`) {
-		t.Errorf("update: %d %s", resp.StatusCode, raw)
+
+	resp, raw = send(t, f, http.MethodPut, "/api/system/v1/groups/"+id, tok, `{"members":["0000000000AA01:1","0000000000BB02:9"]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update: %d %s", resp.StatusCode, raw)
 	}
-	if resp, raw := get(t, f, "/api/system/v1/groups/"+id, tok); resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"device":"INT0000001"`) {
+	has("update", raw, `"members":[`+window+`,`+relay+`]`, `"devices_to_configure":[`+window+`,`+relay+`]`, `"assignable":[]`)
+
+	// A name-only update keeps the members and renames the group device.
+	_, raw = send(t, f, http.MethodPut, "/api/system/v1/groups/"+id, tok, `{"name":"Heizung OG"}`)
+	has("rename", raw, `"name":"Heizung OG"`, `"device_name":"Heizung OG INT0000001"`, `"members":[`+window+`,`+relay+`]`)
+
+	resp, raw = get(t, f, "/api/system/v1/groups/"+id, tok)
+	if resp.StatusCode != http.StatusOK || strings.Contains(string(raw), "devices_to_configure") {
 		t.Errorf("detail: %d %s", resp.StatusCode, raw)
 	}
-	if resp, raw := send(t, f, http.MethodDelete, "/api/system/v1/groups/"+id, tok, `{}`); resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"former_members":["A","B"]`) {
+	has("detail", raw, `"device":"INT0000001"`, `"members":[`+window+`,`+relay+`]`, types)
+
+	resp, raw = send(t, f, http.MethodDelete, "/api/system/v1/groups/"+id, tok, `{}`)
+	if resp.StatusCode != http.StatusOK {
 		t.Errorf("delete: %d %s", resp.StatusCode, raw)
 	}
+	has("delete", raw, `"deleted":1`, `"former_members":[`+window+`,`+relay+`]`)
 	if resp, raw := get(t, f, "/api/system/v1/groups/"+id, tok); resp.StatusCode != http.StatusNotFound || errorCode(t, raw) != "unknown-group" {
 		t.Errorf("deleted group: %d %s", resp.StatusCode, raw)
+	}
+	if _, raw := get(t, f, "/api/system/v1/groups/types", tok); true {
+		has("types after delete", raw, `"assignable":[`+window+`,`+relay+`],"leftover":[]`)
+	}
+}
+
+// TestSystemGroupDropsAMemberItsTypeCannotTake pins what a box does with a
+// member id that is no candidate of the group's type: the write answers
+// 200 and the group does not hold it. A client that trusts the status
+// alone believes it assigned a device it did not.
+func TestSystemGroupDropsAMemberItsTypeCannotTake(t *testing.T) {
+	f := startFake(t, litefake.Options{GroupCandidates: groupCandidates()})
+	tok := litefake.DefaultToken
+	resp, raw := send(t, f, http.MethodPost, "/api/system/v1/groups", tok, `{"name":"Leer","type":"hmip.heating.group","members":["0000000000FFFF:1"]}`)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"members":[]`) || !strings.Contains(string(raw), `"devices_to_configure":[]`) {
+		t.Fatalf("create with a member the type cannot take: %d %s", resp.StatusCode, raw)
+	}
+	// Without seeded candidates no type takes anything.
+	bare := startSystemFake(t)
+	_, raw = send(t, bare, http.MethodPost, "/api/system/v1/groups", tok, `{"name":"Leer","type":"hmip.heating.group","members":["0000000000AA01:1"]}`)
+	if !strings.Contains(string(raw), `"members":[]`) {
+		t.Errorf("a fake without candidates kept a member: %s", raw)
 	}
 }
 

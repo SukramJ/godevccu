@@ -11,6 +11,21 @@ is excluded from the stability promise.
 
 ### Changed
 
+- **BREAKING (`pkg/litefake`):** heating groups answer members the way
+  an openccu-lite box does. `members`, `former_members` and
+  `devices_to_configure` are objects (`{id, serial, type}`) instead of
+  bare ids; a create and an update answer the group's detail plus the
+  members as `devices_to_configure`; the detail carries
+  `device_name` as `<name> <device>`, every offered type as
+  `{id, label}` and no `type_label`; the type labels are the box's
+  (`Heating_Control`, `HmIP-Heizungssteuerung`). The candidates of a
+  group type are seeded with the new `Options.GroupCandidates`; a
+  member that is no candidate is dropped without an error, as on a
+  box, and a channel that belongs to a group is listed as `leftover`.
+  A test that created a group with an arbitrary member id now has to
+  seed that id as a candidate. Read and written on a box on
+  2026-10-03; `CONTRACT.md` records the observations.
+
 - **Requires Go 1.27.1.** `go.mod` targets Go 1.27.1 and CI and release
   builds use it, the same patch release openccu-loom builds with.
 
