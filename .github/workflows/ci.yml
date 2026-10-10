@@ -15,11 +15,11 @@ concurrency:
 
 env:
   CGO_ENABLED: "0"
-  GO_VERSION: "1.27.1"
+  GO_VERSION: "1.27.2"
   # golangci-lint is installed from source with this toolchain: a binary
   # built with an older Go refuses to run against a module targeting a
   # newer one, which is what the prebuilt golangci-lint-action binary is.
-  GOLANGCI_LINT_VERSION: "v2.13.0"
+  GOLANGCI_LINT_VERSION: "v2.14.0"
 
 jobs:
   lint:

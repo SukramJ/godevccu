@@ -9,6 +9,12 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Security
+
+- Built with Go 1.27.2, which fixes Go standard-library vulnerabilities
+  (net/http and HTTP/2, crypto/tls, net/textproto, html/template).
+  golangci-lint v2.14.0 (reads Go 1.27.2's export data).
+
 ## [0.9.0] — 2026-10-03
 
 ### Changed
