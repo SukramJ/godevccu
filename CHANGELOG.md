@@ -9,6 +9,17 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added
+
+- **2-channel HB-LC-Bl1-Velux.** The AskSin firmware of this homebrew
+  Velux actuator builds as a 1- or a 2-channel device under the same
+  TYPE. The 2-channel variant (two `BLIND` channels) is added as
+  `HB-LC-Bl1-Velux-2ch.json` next to the existing 1-channel file; the
+  device keeps reporting `HB-LC-Bl1-Velux`. The filename is only the
+  catalogue key, so pass `HB-LC-Bl1-Velux-2ch` to restrict a run to
+  this variant. Data from a device export
+  (SukramJ/aiohomematic#3447).
+
 ### Security
 
 - Built with Go 1.27.2, which fixes Go standard-library vulnerabilities
