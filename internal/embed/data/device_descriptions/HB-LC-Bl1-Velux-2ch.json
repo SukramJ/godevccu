@@ -1,0 +1,78 @@
+[
+  {
+    "ADDRESS": "VCU8469159",
+    "CHILDREN": [
+      "VCU8469159:0",
+      "VCU8469159:1",
+      "VCU8469159:2"
+    ],
+    "FIRMWARE": "2.4",
+    "FLAGS": 1,
+    "INTERFACE": "PEQ1942124",
+    "PARAMSETS": [
+      "MASTER"
+    ],
+    "PARENT": "",
+    "RF_ADDRESS": 5845505,
+    "ROAMING": 0,
+    "RX_MODE": 2,
+    "TYPE": "HB-LC-Bl1-Velux",
+    "VERSION": 1
+  },
+  {
+    "ADDRESS": "VCU8469159:0",
+    "AES_ACTIVE": 0,
+    "CHILDREN": [],
+    "DIRECTION": 0,
+    "FLAGS": 3,
+    "INDEX": 0,
+    "LINK_SOURCE_ROLES": "",
+    "LINK_TARGET_ROLES": "",
+    "PARAMSETS": [
+      "MASTER",
+      "VALUES"
+    ],
+    "PARENT": "VCU8469159",
+    "PARENT_TYPE": "HB-LC-Bl1-Velux",
+    "TYPE": "MAINTENANCE",
+    "VERSION": 1
+  },
+  {
+    "ADDRESS": "VCU8469159:1",
+    "AES_ACTIVE": 0,
+    "CHILDREN": [],
+    "DIRECTION": 2,
+    "FLAGS": 1,
+    "INDEX": 1,
+    "LINK_SOURCE_ROLES": "",
+    "LINK_TARGET_ROLES": "SWITCH WEATHER_CS",
+    "PARAMSETS": [
+      "LINK",
+      "MASTER",
+      "VALUES"
+    ],
+    "PARENT": "VCU8469159",
+    "PARENT_TYPE": "HB-LC-Bl1-Velux",
+    "TYPE": "BLIND",
+    "VERSION": 1
+  },
+  {
+    "ADDRESS": "VCU8469159:2",
+    "AES_ACTIVE": 0,
+    "CHILDREN": [],
+    "DIRECTION": 2,
+    "FLAGS": 1,
+    "INDEX": 2,
+    "LINK_SOURCE_ROLES": "",
+    "LINK_TARGET_ROLES": "SWITCH WEATHER_CS",
+    "PARAMSETS": [
+      "LINK",
+      "MASTER",
+      "VALUES"
+    ],
+    "PARENT": "VCU8469159",
+    "PARENT_TYPE": "HB-LC-Bl1-Velux",
+    "TYPE": "BLIND",
+    "VERSION": 1
+  }
+]
