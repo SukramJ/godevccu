@@ -87,3 +87,30 @@ func TestUnknownDeviceReturnsError(t *testing.T) {
 		t.Fatal("expected error for unknown device")
 	}
 }
+
+// TestSetValueAcceptsAnEnumLabel: an HmIP ENUM (string MIN/MAX, such as
+// the HmIP-BSL's COLOR) is written by its label, which is stored as the
+// index the CCU reports; a label outside the VALUE_LIST is refused
+// instead of being coerced to the first slot.
+func TestSetValueAcceptsAnEnumLabel(t *testing.T) {
+	rpc, err := ccu.NewRPCFunctions(ccu.Options{Devices: []string{"HmIP-BSL"}})
+	if err != nil {
+		t.Fatalf("NewRPCFunctions HmIP-BSL: %v", err)
+	}
+	if err := rpc.SetValue("VCU6985973:8", "COLOR", "GREEN", true); err != nil {
+		t.Fatalf("SetValue COLOR=GREEN: %v", err)
+	}
+	got, err := rpc.GetValue("VCU6985973:8", "COLOR")
+	if err != nil {
+		t.Fatalf("GetValue: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("COLOR after GREEN = %v (%T), want index 2", got, got)
+	}
+	if err := rpc.SetValue("VCU6985973:8", "COLOR", "CHARTREUSE", true); err == nil {
+		t.Fatal("a label outside the VALUE_LIST was accepted")
+	}
+	if got, _ := rpc.GetValue("VCU6985973:8", "COLOR"); got != 2 {
+		t.Fatalf("COLOR after the refused label = %v, want the previous 2", got)
+	}
+}
