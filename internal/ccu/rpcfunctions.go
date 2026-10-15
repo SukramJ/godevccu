@@ -947,6 +947,22 @@ func (r *RPCFunctions) putParamset(address, paramsetKey string, paramset map[str
 			return nil, nil
 		}
 
+		// An HmIP ENUM is written by its label: a parameter whose MIN
+		// is a string (BLACK, not 0) is string-based, and a client sends
+		// the VALUE_LIST entry itself, as aiohomematic does
+		// (model/data_point.py `_enum_value_is_index`, select.py
+		// `_prepare_value_for_sending`). The label becomes its index in
+		// the stored paramset — the value the CCU reports back — and a
+		// label outside the list is refused, where a numeric conversion
+		// would have silently stored 0 (the first slot) for every label.
+		if label, isLabel := value.(string); isLabel && paramType == hmconst.ParamsetTypeEnum {
+			idx, found := enumLabelIndex(label, paramData)
+			if !found {
+				r.mu.Unlock()
+				return nil, invalidValue(address, valueKey, fmt.Errorf("label %q is not in VALUE_LIST", label))
+			}
+			value = idx
+		}
 		converted := convertParamValue(value, paramType)
 		switch paramType {
 		case hmconst.ParamsetTypeEnum:
@@ -1603,6 +1619,17 @@ func convertParamValue(value any, paramType string) any {
 		return toFloat(value)
 	}
 	return value
+}
+
+// enumLabelIndex is the position of a label in the parameter's VALUE_LIST.
+func enumLabelIndex(label string, desc map[string]any) (int, bool) {
+	list, _ := desc[hmconst.ParamsetAttrValueList].([]any)
+	for i, v := range list {
+		if s, ok := v.(string); ok && s == label {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func validateEnumBounds(value any, desc map[string]any) error {

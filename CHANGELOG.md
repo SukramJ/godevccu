@@ -9,6 +9,19 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An HmIP ENUM written by its label is stored as that label's slot.**
+  A parameter whose MIN is a string (the HmIP-BSL's `COLOR`: `BLACK` …
+  `WHITE`) is string-based, and clients write the VALUE_LIST entry
+  itself — aiohomematic's `_enum_value_is_index` rule, openccu-loom's
+  `EnumWireValue`. The simulator converted every label numerically and
+  silently stored 0, the first slot, so a `COLOR=GREEN` write became
+  `BLACK` and a test reading the CCU side could not tell a landed write
+  from a dropped one. The label now becomes its index in the stored
+  paramset (the value the CCU reports back) and a label outside the
+  VALUE_LIST is refused as an invalid value. Index writes are unchanged.
+
 ## [0.10.0] — 2026-10-15
 
 ### Added
