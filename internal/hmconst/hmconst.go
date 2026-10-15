@@ -8,7 +8,7 @@
 package hmconst
 
 // Version of the godevccu package itself.
-const Version = "0.10.0"
+const Version = "0.10.1"
 
 // BackendMode selects the simulation flavour.
 type BackendMode int
