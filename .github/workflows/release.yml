@@ -140,6 +140,14 @@ jobs:
             ' CHANGELOG.md
           } > release-notes.md
           cat release-notes.md
+      # Stable releases open with the one-line sponsoring note in
+      # .github/SPONSORING.md; a prerelease tag does not.
+      - name: Prepend sponsoring note
+        if: needs.meta.outputs.prerelease != 'true'
+        run: |
+          set -euo pipefail
+          { cat .github/SPONSORING.md; cat release-notes.md; } > notes.tmp
+          mv notes.tmp release-notes.md
       - name: create release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
         with:
