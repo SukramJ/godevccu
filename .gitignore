@@ -36,3 +36,6 @@ go.work.sum
 # Persistence files written at runtime
 paramsets_db.json
 
+
+# Claude Code local settings
+.claude/settings.local.json
