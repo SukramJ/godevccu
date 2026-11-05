@@ -69,3 +69,48 @@ func TestLoadAllDevicesVariantFileKeepsReportedType(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadAllDevicesHmIPBDTI locks in the HmIP-BDT-I catalogue entry.
+// It is not the HmIP-BDT with a suffix: channel 3 is an extra
+// MULTI_MODE_INPUT_TRANSMITTER, so the dimmer channels move up by one
+// and there are 8 channels instead of 7.
+func TestLoadAllDevicesHmIPBDTI(t *testing.T) {
+	sets, err := loadAllDevices([]string{"HmIP-BDT-I"}, false)
+	if err != nil {
+		t.Fatalf("loadAllDevices(HmIP-BDT-I): %v", err)
+	}
+	if len(sets) != 1 {
+		t.Fatalf("loadAllDevices(HmIP-BDT-I) returned %d device sets, want 1", len(sets))
+	}
+	set := sets[0]
+	channelTypes := map[string]any{}
+	for _, dev := range set.devices {
+		addr, _ := dev["ADDRESS"].(string)
+		if addr == set.rootDeviceAddr {
+			if dev["TYPE"] != "HmIP-BDT-I" {
+				t.Errorf("root TYPE = %v, want HmIP-BDT-I", dev["TYPE"])
+			}
+			continue
+		}
+		channelTypes[addr[len(set.rootDeviceAddr):]] = dev["TYPE"]
+	}
+	want := map[string]string{
+		":0": "MAINTENANCE",
+		":1": "KEY_TRANSCEIVER",
+		":2": "KEY_TRANSCEIVER",
+		":3": "MULTI_MODE_INPUT_TRANSMITTER",
+		":4": "DIMMER_TRANSMITTER",
+		":5": "DIMMER_VIRTUAL_RECEIVER",
+		":6": "DIMMER_VIRTUAL_RECEIVER",
+		":7": "DIMMER_VIRTUAL_RECEIVER",
+		":8": "DIMMER_WEEK_PROFILE",
+	}
+	if len(channelTypes) != len(want) {
+		t.Errorf("%d channels, want %d", len(channelTypes), len(want))
+	}
+	for suffix, typ := range want {
+		if channelTypes[suffix] != typ {
+			t.Errorf("channel %s TYPE = %v, want %s", suffix, channelTypes[suffix], typ)
+		}
+	}
+}

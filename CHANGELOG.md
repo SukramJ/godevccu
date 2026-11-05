@@ -9,6 +9,13 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added
+
+- **HmIP-BDT-I.** The wall dimmer with an extra input on channel 3
+  (`MULTI_MODE_INPUT_TRANSMITTER`) has 8 channels instead of the
+  HmIP-BDT's 7, so its dimmer channels sit one higher (transmitter 4,
+  virtual receivers 5-7, week profile 8). Data from a device export.
+
 ## [0.10.1] — 2026-10-15
 
 ### Fixed
