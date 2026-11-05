@@ -9,12 +9,20 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-11-05
+
 ### Added
 
 - **HmIP-BDT-I.** The wall dimmer with an extra input on channel 3
   (`MULTI_MODE_INPUT_TRANSMITTER`) has 8 channels instead of the
   HmIP-BDT's 7, so its dimmer channels sit one higher (transmitter 4,
   virtual receivers 5-7, week profile 8). Data from a device export.
+
+### Security
+
+- Built with Go 1.27.3, which fixes GO-2026-6809 (crypto/x509).
+  `go.mod` targets Go 1.27.3, so a consumer module has to be on Go
+  1.27.3 or newer.
 
 ## [0.10.1] — 2026-10-15
 
@@ -796,7 +804,8 @@ Initial release. A standalone Go port of
   and `3.87.1.20250130` in CCU/OpenCCU mode — identical to upstream
   pydevccu so clients that branch on the prefix keep working.
 
-[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/SukramJ/godevccu/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/SukramJ/godevccu/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/SukramJ/godevccu/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/SukramJ/godevccu/compare/v0.8.0...v0.9.0
