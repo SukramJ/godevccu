@@ -52,6 +52,9 @@ const (
 	// DeviateVersionHTML answers /api/meta/v1/version with the HTML
 	// shell, as a box whose API is not there would.
 	DeviateVersionHTML Deviation = "version-html"
+	// DeviateVersionNoInterfaces leaves `interfaces` out of
+	// /api/meta/v1/version, as a box from before occulited 9ee3588 does.
+	DeviateVersionNoInterfaces Deviation = "version-no-interfaces"
 )
 
 // Deviate switches a deviation on or off. Concurrency-safe; it applies

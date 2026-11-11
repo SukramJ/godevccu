@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -187,6 +188,7 @@ type Fake struct {
 	meta    *metaStore
 	pairing *pairingState
 	system  *systemState
+	notices *noticeStore
 
 	mu            sync.Mutex
 	ready         bool
@@ -247,6 +249,7 @@ func Start(ctx context.Context, opts Options) (*Fake, error) {
 	f.meta = newMetaStore(opts.Meta, opts.MetaLog, opts.MetaQueue)
 	f.pairing = newPairingState(opts)
 	f.system = newSystemState(opts.GroupCandidates)
+	f.notices = newNoticeStore()
 	f.metaHeartbeat = opts.MetaHeartbeatInterval
 	f.sessions = map[string]*session{}
 	f.setTokens(opts.Tokens)
@@ -458,6 +461,7 @@ func (f *Fake) routes() http.Handler {
 	f.metaRoutes(mux)
 	f.pairingRoutes(mux)
 	f.systemRoutes(mux)
+	f.noticeRoutes(mux)
 	mux.HandleFunc("GET /upnp/basic_dev.cgi", f.handleUPnP)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not-found", "no such endpoint")
@@ -685,12 +689,15 @@ func (f *Fake) handleHealth(w http.ResponseWriter, _ *http.Request) {
 // metaVersion is the /api/meta/v1/version answer, the document client
 // detection classifies a box by.
 type metaVersion struct {
-	API            string           `json:"api"`
-	Version        int              `json:"version"`
-	Format         int              `json:"format"`
-	Revision       int              `json:"revision"`
-	Implementation string           `json:"implementation"`
-	Capabilities   metaCapabilities `json:"capabilities"`
+	API            string `json:"api"`
+	Version        int    `json:"version"`
+	Format         int    `json:"format"`
+	Revision       int    `json:"revision"`
+	Implementation string `json:"implementation"`
+	// Interfaces names the interfaces lite-rpc offers, sorted; nil
+	// (absent on the wire) for a box from before the member.
+	Interfaces   *[]string        `json:"interfaces,omitempty"`
+	Capabilities metaCapabilities `json:"capabilities"`
 }
 
 type metaCapabilities struct {
@@ -724,11 +731,17 @@ func (f *Fake) handleMetaVersion(w http.ResponseWriter, r *http.Request) {
 	if f.deviates(DeviateVersionMajor) {
 		apis["rpc"] = 2
 	}
+	var interfaces *[]string
+	if !f.deviates(DeviateVersionNoInterfaces) {
+		names := slices.Sorted(slices.Values(f.interfaceNames()))
+		interfaces = &names
+	}
 	writeJSON(w, http.StatusOK, metaVersion{
 		API:            "meta",
 		Version:        1,
 		Format:         1,
 		Implementation: "occulited " + fakeVersion,
+		Interfaces:     interfaces,
 		Revision:       f.Meta().Revision(),
 		Capabilities: metaCapabilities{
 			Pairing:    !f.pairingDisabled(),

@@ -374,3 +374,22 @@ trees).
 
 ---
 
+## Additions after the appendix's pin
+
+The appendix above is reproduced as it was written, at occulited
+`24127692918f`. litefake also follows these later rules of the box, each
+named with the occulited commit that introduced it:
+
+- **Add-on notices** (`5783ccd`, 2026-10-27). `GET /api/system/v1/addon-notices`
+  → `{addon, max, notices: [{id, severity, title: {de, en}, text?, link?, expires?, posted, updated}]}`;
+  `PUT /addon-notices/{id}` with `{severity: "error"|"warning"|"info", title: {de, en}, text?, link?, ttl?}`
+  → `201` for a new notice, `200` for a replaced one whose `posted` stays; `DELETE /addon-notices/{id}`
+  → `{ok}`, `404 not_found` for one the add-on does not hold; `DELETE /addon-notices` → `{ok, cleared}`.
+  The routes are open: the credential is the add-on's **control token** as `Authorization: Bearer`,
+  `401 unauthenticated` without it or with an unknown one. An unknown field is `400`, a broken rule
+  `422 invalid` naming the field (id `a-z0-9._-`, at most 64, starting with a letter or digit; title at
+  most 160 and text at most 1000 characters, both languages; link an in-app path; ttl 0 to 366 days),
+  the twenty-first notice of an add-on `409 too-many`. litefake holds one add-on, `openccu-loom`; it
+  records `expires` and never lets a notice expire.
+- **`interfaces` in `/api/meta/v1/version`** (`9ee3588`, 2026-11-10): the names lite-rpc offers,
+  sorted, readable without a credential; absent on a box from before it.

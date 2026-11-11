@@ -21,6 +21,18 @@ is excluded from the stability promise.
 - **litefake: the `firmware` stream message.** `PublishFirmware(iface,
   address, updateState)` puts one on the stream; it is filtered by
   address like an event (occulited `11bed1d`).
+- **litefake: add-on notices.** `GET`, `PUT` and `DELETE
+  /api/system/v1/addon-notices` with the add-on's control token as a
+  Bearer (`DefaultAddonControlToken`; `SetAddonControlToken` replaces it
+  as a restart of the box's service does): a notice is posted (201),
+  replaced (200, its first posting time kept) and cleared, an unknown
+  field is 400, a broken rule 422 naming the field, the twenty-first
+  notice 409 (occulited `5783ccd`). `AddonNotices`, `AddonNoticePuts`
+  and `DropAddonNotices` are for a test's assertions.
+- **litefake: `/api/meta/v1/version` names the interfaces.** The open
+  version document carries `interfaces`, the names lite-rpc offers,
+  sorted (occulited `9ee3588`); `DeviateVersionNoInterfaces` leaves the
+  member out, as a box from before it does.
 - **litefake: one system update at a time.** `SetUpdateBusy` puts an
   update in flight: `GET /system-update` reports it as `busy`, and
   download and install answer `409 busy` with its phase and file as the
