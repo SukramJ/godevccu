@@ -9,6 +9,8 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-12
+
 ### Added
 
 - **`RPC().UpdateDevice(ctx, address, hint)`** pushes an `updateDevice`
@@ -852,7 +854,8 @@ Initial release. A standalone Go port of
   and `3.87.1.20250130` in CCU/OpenCCU mode — identical to upstream
   pydevccu so clients that branch on the prefix keep working.
 
-[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/SukramJ/godevccu/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/SukramJ/godevccu/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/SukramJ/godevccu/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/SukramJ/godevccu/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/SukramJ/godevccu/compare/v0.9.0...v0.10.0
