@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,15 +35,19 @@ const (
 // archive, its signature, the firmware version), as the box serves one,
 // so the daemon's archive inspection accepts it; the member contents are
 // placeholders.
-var backupBlob = sbkBlob()
+var backupBlob = sbkBlob("VERSION=" + fakeBase + "\nLITE=" + fakeRelease + "\nPRODUCT=openccu-lite\n")
 
-func sbkBlob() []byte {
+// ccuBackupBlob is a system backup of a CCU that is not openccu-lite:
+// the same member layout, a firmware_version without a LITE= line.
+var ccuBackupBlob = sbkBlob("VERSION=" + fakeBase + "\nPRODUCT=raspmatic_rpi3\n")
+
+func sbkBlob(firmwareVersion string) []byte {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 	for _, m := range []struct{ name, body string }{
 		{"usr_local.tar.gz", "litefake configuration archive"},
 		{"signature", "litefake signature"},
-		{"firmware_version", "VERSION=" + fakeBase + "\nPRODUCT=openccu-lite\n"},
+		{"firmware_version", firmwareVersion},
 	} {
 		if err := tw.WriteHeader(&tar.Header{Name: m.name, Mode: 0o644, Size: int64(len(m.body))}); err != nil {
 			panic(err) // invariant: writing to a bytes.Buffer cannot fail
@@ -59,6 +64,11 @@ func sbkBlob() []byte {
 
 // BackupBlob returns the bytes GET /api/system/v1/backup streams.
 func BackupBlob() []byte { return append([]byte(nil), backupBlob...) }
+
+// CCUBackupBlob returns a system backup of a CCU that is not
+// openccu-lite. The restore check reports it as kind "ccu" and
+// restore/apply refuses it with 422 not_openccu_lite.
+func CCUBackupBlob() []byte { return append([]byte(nil), ccuBackupBlob...) }
 
 // BackupFileName is the Content-Disposition file name of the backup.
 const BackupFileName = "openccu-lite-fake.sbk"
@@ -364,6 +374,51 @@ type restoreCheckAnswer struct {
 	File       string            `json:"file"`
 	Check      restoreCheck      `json:"check"`
 	Encryption restoreEncryption `json:"encryption"`
+	// Backup says what the file is; null for a file that is no archive.
+	Backup *restoreBackup `json:"backup"`
+}
+
+// restoreBackup is the part of the check's backup report the contract
+// names: which firmware the archive is a backup of.
+type restoreBackup struct {
+	Kind    string `json:"kind"`
+	System  string `json:"system"`
+	Version string `json:"version"`
+}
+
+const (
+	backupKindLite = "openccu-lite"
+	backupKindCCU  = "ccu"
+)
+
+// backupReport reads an uploaded archive's firmware_version member: a
+// LITE= line makes it an openccu-lite backup, its absence a CCU's. A
+// file that is no tar archive, or has no such member, has no report.
+func backupReport(data []byte) *restoreBackup {
+	tr := tar.NewReader(bytes.NewReader(data))
+	for {
+		h, err := tr.Next()
+		if err != nil {
+			return nil
+		}
+		if h.Name != "firmware_version" {
+			continue
+		}
+		raw, err := io.ReadAll(io.LimitReader(tr, 1<<16))
+		if err != nil {
+			return nil
+		}
+		rep := &restoreBackup{Kind: backupKindCCU, System: "OpenCCU"}
+		for line := range strings.SplitSeq(string(raw), "\n") {
+			if v, ok := strings.CutPrefix(line, "VERSION="); ok {
+				rep.Version = v
+			}
+			if strings.HasPrefix(line, "LITE=") {
+				rep.Kind, rep.System = backupKindLite, backupKindLite
+			}
+		}
+		return rep
+	}
 }
 
 // handleRestoreCheck accepts an archive as a multipart "file" part or
@@ -399,6 +454,7 @@ func (f *Fake) handleRestoreCheck(w http.ResponseWriter, r *http.Request) {
 			Encrypted: needsKey, NeedsRecoveryKey: needsKey,
 			CreatedHere: bytes.Equal(data, backupBlob),
 		},
+		Backup: backupReport(data),
 	})
 }
 
@@ -406,6 +462,9 @@ type restoreApplyBody struct {
 	File  string `json:"file"`
 	Key   string `json:"key"`
 	Force bool   `json:"force"`
+	// Confirm is required: a restore replaces the system's
+	// configuration, its radio identity files with it.
+	Confirm bool `json:"confirm"`
 }
 
 type restoreApplyAnswer struct {
@@ -421,17 +480,25 @@ func (f *Fake) handleRestoreApply(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad-request", "invalid body")
 		return
 	}
+	if !body.Confirm {
+		writeError(w, http.StatusBadRequest, "confirm", "confirm: true is required")
+		return
+	}
 	s := f.system
 	s.mu.Lock()
-	_, ok := s.uploads[body.File]
-	if ok {
-		s.applied = append(s.applied, body.File)
-	}
+	data, ok := s.uploads[body.File]
 	s.mu.Unlock()
 	if !ok {
 		writeError(w, http.StatusUnprocessableEntity, "restore-failed", "no checked upload "+body.File)
 		return
 	}
+	if rep := backupReport(data); rep == nil || rep.Kind != backupKindLite {
+		writeError(w, http.StatusUnprocessableEntity, "not_openccu_lite", "this file is not a backup of openccu-lite")
+		return
+	}
+	s.mu.Lock()
+	s.applied = append(s.applied, body.File)
+	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, restoreApplyAnswer{OK: true, Rebooting: true})
 }
 

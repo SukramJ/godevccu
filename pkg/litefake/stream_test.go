@@ -315,3 +315,35 @@ func TestFakeStreamsDeviceSnapshots(t *testing.T) {
 		t.Errorf("device-list message %+v", list)
 	}
 }
+
+// TestFakeStreamsUpdateAndReplaceDevice pins what a device-change message
+// carries beside its addresses: updateDevice the interface's hint,
+// replaceDevice the old and the new address by name.
+func TestFakeStreamsUpdateAndReplaceDevice(t *testing.T) {
+	f := startFake(t, litefake.Options{})
+	s, resp := openStream(t, f, litefake.DefaultToken, "type=updateDevice,replaceDevice", "")
+	if s == nil {
+		t.Fatalf("events: %d", resp.StatusCode)
+	}
+	readHello(t, s)
+	type change struct {
+		Addresses []string `json:"addresses"`
+		Hint      *int     `json:"hint"`
+		Old       string   `json:"old"`
+		New       string   `json:"new"`
+	}
+
+	f.V().InterfaceRPC(bidcosRF).UpdateDevice(t.Context(), "VCU0000001", 1)
+	upd := s.nextMessage(t, waitFrame)
+	u := decode[change](t, upd.data)
+	if upd.event != "updateDevice" || len(u.Addresses) != 1 || u.Addresses[0] != "VCU0000001" || u.Hint == nil || *u.Hint != 1 {
+		t.Errorf("updateDevice frame %q %s, want the address and hint 1", upd.event, upd.data)
+	}
+
+	f.V().InterfaceRPC(bidcosRF).ReplaceDevice(t.Context(), "OLD0000001", "NEW0000001")
+	rpl := s.nextMessage(t, waitFrame)
+	r := decode[change](t, rpl.data)
+	if rpl.event != "replaceDevice" || len(r.Addresses) != 2 || r.Old != "OLD0000001" || r.New != "NEW0000001" || r.Hint != nil {
+		t.Errorf("replaceDevice frame %q %s, want old and new named and no hint", rpl.event, rpl.data)
+	}
+}

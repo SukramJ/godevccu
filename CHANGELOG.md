@@ -9,6 +9,30 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added
+
+- **`RPC().UpdateDevice(ctx, address, hint)`** pushes an `updateDevice`
+  system event to every registered callback receiver, beside the
+  existing `ReplaceDevice` and `ReaddedDevice` pushes.
+- **litefake: the stream passes on the hint and names the replaced
+  device.** An `updateDevice` message carries `hint` as the interface
+  sent it, a `replaceDevice` message `old` and `new` beside
+  `addresses`, as the box does since occulited `2fc25cb`.
+
+### Changed
+
+- **litefake: a restore needs `confirm: true`.** `POST
+  /api/system/v1/restore/apply` without it answers `400 confirm` and
+  applies nothing, as the box has done since occulited `6826b85`. A
+  client that sent `{file}` alone passed against the fake and was
+  refused by a box.
+- **litefake: a restore takes an openccu-lite backup alone.** The
+  restore check reports what the file is (`backup: {kind, system,
+  version}`, `null` for a file that is no archive), and
+  `restore/apply` refuses a CCU's backup or a non-archive with `422
+  not_openccu_lite`. `CCUBackupBlob()` is such a backup for tests; the
+  fake's own backup now carries a `LITE=` line in `firmware_version`.
+
 ## [0.11.0] — 2026-11-05
 
 ### Added
