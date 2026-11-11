@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -434,6 +435,26 @@ func TestFakeAnswersStartingWhileNotReady(t *testing.T) {
 	}](t, string(body))
 	if v.API != "meta" || v.Capabilities.APIs["rpc"] != 1 {
 		t.Errorf("version document %s", body)
+	}
+}
+
+// TestFakeVersionNamesItsInterfaces pins the open interface names of
+// /api/meta/v1/version: the names lite-rpc offers, sorted, readable
+// without a credential; a box from before the member answers none.
+func TestFakeVersionNamesItsInterfaces(t *testing.T) {
+	f := startFake(t, litefake.Options{})
+	type version struct {
+		Interfaces *[]string `json:"interfaces"`
+	}
+	_, body := get(t, f, "/api/meta/v1/version", "")
+	v := decode[version](t, string(body))
+	if v.Interfaces == nil || len(*v.Interfaces) != 3 || !slices.IsSorted(*v.Interfaces) || !slices.Contains(*v.Interfaces, bidcosRF) {
+		t.Errorf("interfaces = %v in %s, want the three interface names sorted", v.Interfaces, body)
+	}
+	f.Deviate(litefake.DeviateVersionNoInterfaces, true)
+	_, body = get(t, f, "/api/meta/v1/version", "")
+	if v := decode[version](t, string(body)); v.Interfaces != nil {
+		t.Errorf("interfaces = %v from a box before the member, want none", *v.Interfaces)
 	}
 }
 

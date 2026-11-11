@@ -24,6 +24,7 @@ const (
 	typeUpdateDevice  = "updateDevice"
 	typeReplaceDevice = "replaceDevice"
 	typeReaddedDevice = "readdedDevice"
+	typeFirmware      = "firmware"
 	typeResync        = "resync"
 )
 

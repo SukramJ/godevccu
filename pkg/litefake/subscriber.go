@@ -100,14 +100,25 @@ func (f *Fake) registerCallbacks(mux *xmlrpc.Mux, iface string) {
 		return xmlrpc.StringValue(""), nil
 	})
 	mux.Handle("updateDevice", func(_ context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
-		// The hint (params[2]) is dropped: the stream carries the one
-		// address only.
-		f.publishDevices(typeUpdateDevice, iface, stringsAt(params, 1, 1))
+		// The hint is passed on as the interface sent it, 0 when the
+		// call had none.
+		hint := 0
+		if len(params) > 2 {
+			if n, ok := xmlrpc.AsInt(params[2]); ok {
+				hint = n
+			}
+		}
+		f.publishDeviceChange(typeUpdateDevice, devicesData{Interface: iface, Addresses: stringsAt(params, 1, 1), Hint: &hint})
 		return xmlrpc.StringValue(""), nil
 	})
 	mux.Handle("replaceDevice", func(_ context.Context, params []xmlrpc.Value) (xmlrpc.Value, error) {
-		// Positional arguments are kept in order: [old, new].
-		f.publishDevices(typeReplaceDevice, iface, stringsAt(params, 1, 2))
+		// Positional arguments are kept in order: [old, new], and named
+		// beside it.
+		d := devicesData{Interface: iface, Addresses: stringsAt(params, 1, 2)}
+		if len(d.Addresses) == 2 {
+			d.Old, d.New = d.Addresses[0], d.Addresses[1]
+		}
+		f.publishDeviceChange(typeReplaceDevice, d)
 		return xmlrpc.StringValue(""), nil
 	})
 }
@@ -196,18 +207,50 @@ func (f *Fake) publishEvent(ctx context.Context, iface, address, key string, v x
 	f.mu.Unlock()
 }
 
-// devicesData is the data of a device-list message: addresses only.
+// devicesData is the data of a device-list message: the addresses, and
+// what the interface's call carried beside them — updateDevice its hint,
+// replaceDevice the old and the new address by name.
 type devicesData struct {
 	Interface string   `json:"interface"`
 	Addresses []string `json:"addresses"`
+	Hint      *int     `json:"hint,omitempty"`
+	Old       string   `json:"old,omitempty"`
+	New       string   `json:"new,omitempty"`
 	TS        string   `json:"ts"`
 }
 
 // publishDevices puts a device-list message on the ring.
 func (f *Fake) publishDevices(typ, iface string, addresses []string) {
+	f.publishDeviceChange(typ, devicesData{Interface: iface, Addresses: addresses})
+}
+
+// publishDeviceChange puts a device-list message on the ring, stamped
+// now.
+func (f *Fake) publishDeviceChange(typ string, d devicesData) {
+	d.TS = time.Now().UTC().Format(time.RFC3339Nano)
+	f.ring.publish(typ, d.Interface, "", "", func(uint64) []byte {
+		return mustJSON(d)
+	})
+}
+
+// firmwareData is the data of a firmware message: a device's firmware
+// update state as the interface last said it.
+type firmwareData struct {
+	Interface   string `json:"interface"`
+	Address     string `json:"address"`
+	UpdateState string `json:"update_state"`
+	TS          string `json:"ts"`
+}
+
+// PublishFirmware puts a firmware message on the stream: the device at
+// address on iface now reports updateState (an interface's
+// FIRMWARE_UPDATE_STATE word such as "READY_FOR_UPDATE"). The fake's
+// virtual CCU has no firmware transfers of its own, so a test says when
+// one moved.
+func (f *Fake) PublishFirmware(iface, address, updateState string) {
 	ts := time.Now().UTC().Format(time.RFC3339Nano)
-	f.ring.publish(typ, iface, "", "", func(uint64) []byte {
-		return mustJSON(devicesData{Interface: iface, Addresses: addresses, TS: ts})
+	f.ring.publish(typeFirmware, iface, address, "", func(uint64) []byte {
+		return mustJSON(firmwareData{Interface: iface, Address: address, UpdateState: updateState, TS: ts})
 	})
 }
 

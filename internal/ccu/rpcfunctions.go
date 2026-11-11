@@ -494,6 +494,28 @@ func (r *RPCFunctions) RemoveDevices(ctx context.Context, devices []string) {
 	}
 }
 
+// UpdateDevice pushes an updateDevice system event to every registered
+// callback receiver, telling them the device at address has changed. The
+// wire shape is (interfaceID, address, hint); the hint is passed on as
+// given.
+func (r *RPCFunctions) UpdateDevice(ctx context.Context, address string, hint int) {
+	r.mu.Lock()
+	remotes := r.snapshotRemotesLocked()
+	r.mu.Unlock()
+
+	for _, e := range remotes {
+		ifID, client := e.interfaceID, e.client
+		params := []xmlrpc.Value{
+			xmlrpc.StringValue(ifID),
+			xmlrpc.StringValue(address),
+			xmlrpc.FromAny(hint),
+		}
+		if _, err := client.Call(ctx, "updateDevice", params); err != nil {
+			r.logger.Debug("ccu: updateDevice push failed", "interface", ifID, "err", err)
+		}
+	}
+}
+
 // ReplaceDevice pushes a replaceDevice system event to every registered
 // callback receiver, telling them the device at oldAddress has been swapped
 // for newAddress. The real CCU emits this during a teach-in replacement; the

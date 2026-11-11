@@ -89,6 +89,10 @@ func (f filter) match(m message) bool {
 	if m.typ == typeEvent || m.typ == typeState {
 		return f.matchAddress(m.address) && inSet(f.keys, m.key)
 	}
+	if m.typ == typeFirmware {
+		// Filtered by address like an event; a key filter does not apply.
+		return f.matchAddress(m.address)
+	}
 	return true
 }
 

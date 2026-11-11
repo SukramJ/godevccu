@@ -9,6 +9,54 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+### Added
+
+- **`RPC().UpdateDevice(ctx, address, hint)`** pushes an `updateDevice`
+  system event to every registered callback receiver, beside the
+  existing `ReplaceDevice` and `ReaddedDevice` pushes.
+- **litefake: the stream passes on the hint and names the replaced
+  device.** An `updateDevice` message carries `hint` as the interface
+  sent it, a `replaceDevice` message `old` and `new` beside
+  `addresses`, as the box does since occulited `2fc25cb`.
+- **litefake: the `firmware` stream message.** `PublishFirmware(iface,
+  address, updateState)` puts one on the stream; it is filtered by
+  address like an event (occulited `11bed1d`).
+- **litefake: add-on notices.** `GET`, `PUT` and `DELETE
+  /api/system/v1/addon-notices` with the add-on's control token as a
+  Bearer (`DefaultAddonControlToken`; `SetAddonControlToken` replaces it
+  as a restart of the box's service does): a notice is posted (201),
+  replaced (200, its first posting time kept) and cleared, an unknown
+  field is 400, a broken rule 422 naming the field, the twenty-first
+  notice 409 (occulited `5783ccd`). `AddonNotices`, `AddonNoticePuts`
+  and `DropAddonNotices` are for a test's assertions.
+- **litefake: `/api/meta/v1/version` names the interfaces.** The open
+  version document carries `interfaces`, the names lite-rpc offers,
+  sorted (occulited `9ee3588`); `DeviateVersionNoInterfaces` leaves the
+  member out, as a box from before it does.
+- **litefake: the paramset description route.** `POST
+  /api/rpc/v1/paramsets/{interface}` answers the descriptions of up to
+  2000 addresses at once as `{keys, paramsets, errors}`, each description
+  once by its key (occulited `2d9c804`); `DeviateNoParamsetsRoute`
+  answers 404, as a box from before the route does.
+- **litefake: one system update at a time.** `SetUpdateBusy` puts an
+  update in flight: `GET /system-update` reports it as `busy`, and
+  download and install answer `409 busy` with its phase and file as the
+  detail (occulited `7b69d5e`).
+
+### Changed
+
+- **litefake: a restore needs `confirm: true`.** `POST
+  /api/system/v1/restore/apply` without it answers `400 confirm` and
+  applies nothing, as the box has done since occulited `6826b85`. A
+  client that sent `{file}` alone passed against the fake and was
+  refused by a box.
+- **litefake: a restore takes an openccu-lite backup alone.** The
+  restore check reports what the file is (`backup: {kind, system,
+  version}`, `null` for a file that is no archive), and
+  `restore/apply` refuses a CCU's backup or a non-archive with `422
+  not_openccu_lite`. `CCUBackupBlob()` is such a backup for tests; the
+  fake's own backup now carries a `LITE=` line in `firmware_version`.
+
 ## [0.11.0] — 2026-11-05
 
 ### Added

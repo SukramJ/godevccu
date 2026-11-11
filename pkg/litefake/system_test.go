@@ -96,21 +96,81 @@ func TestSystemBackupAndRestore(t *testing.T) {
 	}
 	resp, raw = send(t, f, http.MethodPost, "/api/system/v1/restore/check", litefake.DefaultToken, string(litefake.BackupBlob()),
 		"Content-Type", "application/octet-stream")
-	check := decode[struct {
-		File  string `json:"file"`
-		Check struct {
-			OK bool `json:"ok"`
-		} `json:"check"`
-	}](t, string(raw))
+	check := decode[restoreChecked](t, string(raw))
 	if resp.StatusCode != http.StatusOK || check.File == "" || !check.Check.OK {
 		t.Fatalf("restore check: %d %s", resp.StatusCode, raw)
 	}
-	resp, raw = send(t, f, http.MethodPost, "/api/system/v1/restore/apply", litefake.DefaultToken, `{"file":"`+check.File+`"}`)
+	if check.Backup == nil || check.Backup.Kind != "openccu-lite" {
+		t.Errorf("restore check: backup = %+v, want kind openccu-lite", check.Backup)
+	}
+	resp, raw = send(t, f, http.MethodPost, "/api/system/v1/restore/apply", litefake.DefaultToken, `{"file":"`+check.File+`","confirm":true}`)
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"rebooting":true`) {
 		t.Errorf("restore apply: %d %s", resp.StatusCode, raw)
 	}
-	if resp, raw := send(t, f, http.MethodPost, "/api/system/v1/restore/apply", litefake.DefaultToken, `{"file":"nope"}`); resp.StatusCode != http.StatusUnprocessableEntity || errorCode(t, raw) != "restore-failed" {
+	if resp, raw := send(t, f, http.MethodPost, "/api/system/v1/restore/apply", litefake.DefaultToken, `{"file":"nope","confirm":true}`); resp.StatusCode != http.StatusUnprocessableEntity || errorCode(t, raw) != "restore-failed" {
 		t.Errorf("restore unknown file: %d %s", resp.StatusCode, raw)
+	}
+}
+
+// restoreChecked is the part of POST /restore/check's answer the tests
+// read.
+type restoreChecked struct {
+	File  string `json:"file"`
+	Check struct {
+		OK bool `json:"ok"`
+	} `json:"check"`
+	Backup *struct {
+		Kind   string `json:"kind"`
+		System string `json:"system"`
+	} `json:"backup"`
+}
+
+// TestSystemRestoreApplyNeedsConfirm pins that restore/apply without
+// {"confirm":true} is refused with 400 confirm and applies nothing.
+func TestSystemRestoreApplyNeedsConfirm(t *testing.T) {
+	f := startSystemFake(t)
+	_, raw := send(t, f, http.MethodPost, "/api/system/v1/restore/check", litefake.DefaultToken, string(litefake.BackupBlob()),
+		"Content-Type", "application/octet-stream")
+	check := decode[restoreChecked](t, string(raw))
+	for _, body := range []string{`{"file":"` + check.File + `"}`, `{"file":"` + check.File + `","confirm":false}`} {
+		resp, raw := send(t, f, http.MethodPost, "/api/system/v1/restore/apply", litefake.DefaultToken, body)
+		if resp.StatusCode != http.StatusBadRequest || errorCode(t, raw) != "confirm" {
+			t.Errorf("apply %s: %d %s, want 400 confirm", body, resp.StatusCode, raw)
+		}
+	}
+	if got := f.Restores(); len(got) != 0 {
+		t.Errorf("Restores() = %v after refused applies, want none", got)
+	}
+}
+
+// TestSystemRestoreRefusesAForeignBackup pins that a CCU's backup checks
+// as kind "ccu" and that restore/apply refuses it, and a file that is no
+// archive, with 422 not_openccu_lite.
+func TestSystemRestoreRefusesAForeignBackup(t *testing.T) {
+	f := startSystemFake(t)
+	for name, tc := range map[string]struct {
+		data     []byte
+		wantKind string
+	}{
+		"ccu backup": {litefake.CCUBackupBlob(), "ccu"},
+		"no archive": {[]byte("not a tar archive"), ""},
+	} {
+		_, raw := send(t, f, http.MethodPost, "/api/system/v1/restore/check", litefake.DefaultToken, string(tc.data),
+			"Content-Type", "application/octet-stream")
+		check := decode[restoreChecked](t, string(raw))
+		switch {
+		case tc.wantKind == "" && check.Backup != nil:
+			t.Errorf("%s: backup = %+v, want null", name, check.Backup)
+		case tc.wantKind != "" && (check.Backup == nil || check.Backup.Kind != tc.wantKind):
+			t.Errorf("%s: backup = %+v, want kind %s", name, check.Backup, tc.wantKind)
+		}
+		resp, raw := send(t, f, http.MethodPost, "/api/system/v1/restore/apply", litefake.DefaultToken, `{"file":"`+check.File+`","confirm":true}`)
+		if resp.StatusCode != http.StatusUnprocessableEntity || errorCode(t, raw) != "not_openccu_lite" {
+			t.Errorf("%s: apply = %d %s, want 422 not_openccu_lite", name, resp.StatusCode, raw)
+		}
+	}
+	if got := f.Restores(); len(got) != 0 {
+		t.Errorf("Restores() = %v after refused applies, want none", got)
 	}
 }
 
@@ -131,6 +191,32 @@ func TestSystemUpdateStagesAndInstalls(t *testing.T) {
 	}
 	if resp, _ := send(t, f, http.MethodPost, "/api/system/v1/system-update/install", litefake.DefaultToken, `{}`); resp.StatusCode != http.StatusOK {
 		t.Errorf("install: %d", resp.StatusCode)
+	}
+}
+
+// TestSystemUpdateIsOneAtATime pins the busy rule: while a system update
+// is in flight the state names it, and download and install answer 409
+// busy with it as the detail; once it ends they work again.
+func TestSystemUpdateIsOneAtATime(t *testing.T) {
+	f := startSystemFake(t)
+	f.SetUpdateAvailable(&litefake.AvailableUpdate{Version: "1.1.0", Newer: true})
+	f.SetUpdateBusy(&litefake.UpdateBusy{Phase: "download", File: "openccu-lite-1.1.0.tar"})
+	_, raw := get(t, f, "/api/system/v1/system-update", litefake.DefaultToken)
+	if !strings.Contains(string(raw), `"busy":{"phase":"download","file":"openccu-lite-1.1.0.tar"}`) {
+		t.Errorf("update state does not name the update in flight: %s", raw)
+	}
+	for _, route := range []string{"download", "install"} {
+		resp, raw := send(t, f, http.MethodPost, "/api/system/v1/system-update/"+route, litefake.DefaultToken, `{}`)
+		if resp.StatusCode != http.StatusConflict || errorCode(t, raw) != "busy" || !strings.Contains(string(raw), `"phase":"download"`) {
+			t.Errorf("%s while busy: %d %s, want 409 busy with the phase", route, resp.StatusCode, raw)
+		}
+	}
+	f.SetUpdateBusy(nil)
+	if _, raw := get(t, f, "/api/system/v1/system-update", litefake.DefaultToken); !strings.Contains(string(raw), `"busy":null`) {
+		t.Errorf("update state after the update ended: %s", raw)
+	}
+	if resp, raw := send(t, f, http.MethodPost, "/api/system/v1/system-update/download", litefake.DefaultToken, `{}`); resp.StatusCode != http.StatusOK {
+		t.Errorf("download after the update ended: %d %s", resp.StatusCode, raw)
 	}
 }
 

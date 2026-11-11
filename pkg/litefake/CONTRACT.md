@@ -157,7 +157,16 @@ Use this appendix as the contract; do not consult occulited source.
   - `interface`: `interface`, `state: up|down|restarted|added|removed`, `ts`.
   - `newDevices`, `deleteDevices`, `updateDevice`, `replaceDevice`, `readdedDevice`: `interface`,
     `addresses: [string]`, `ts` — **addresses only**; `updateDevice` carries one address and **no
-    hint**; `replaceDevice` carries `[old, new]`.
+    hint**; `replaceDevice` carries `[old, new]`. Since occulited `2fc25cb` (2026-10-02) the box
+    passes on what the interface's call carried: `updateDevice` also has `hint` (as the interface
+    sent it, 0 when the call had none), `replaceDevice` also `old` and `new`; litefake sends both.
+  - `firmware` (since occulited `11bed1d`, 2026-10-14): `interface`, `address`, `update_state`,
+    `transfer?`, `ts` — a device's firmware update state as the interface last said it; filtered by
+    `address` like an event, `key` does not apply. litefake sends it only when a test publishes one
+    and never carries `transfer`.
+  - Since occulited `7b69d5e` (2026-10-23) `GET /system-update` carries `busy: null|{phase, file}` and
+    `POST /system-update/download` and `/install` answer `409 busy` with `detail: {phase, file}` while
+    a download, an upload or an install runs. litefake checks it before every other refusal.
   - `resync`: `reason: boot|gap|overflow` (no id; sent regardless of filters).
 - **Value typing on the stream** (differs from the JSON-RPC path): `i4`/`int` → int (**parse failure →
   0 silently**); `boolean` → bool (`"1"`/`"true"`); `double` → float64 (**JSON writes `1.0` as `1`**);
@@ -269,8 +278,8 @@ Use this appendix as the contract; do not consult occulited source.
 | `GET /backup` | backup | streams a CCU-compatible `.sbk` (`Content-Disposition` with the CCU's file name); with backup encryption on: `<name>.sbk.age`, no `Content-Length`; `?encrypted=false` → plain (a token passes without a confirm ticket) |
 | `POST /backup/run {target?}` | backup | `202 {started, instance}`; `409 busy` |
 | `GET /backup/targets` | system:read | `{nightly, container, kinds, encryption, hostname, needed_bytes, targets: [{id, name, kind, enabled, …, state: {state, detail?, …}, last_backup?: {at, ok, state, step?, error?, name?, size?, encrypted, …}}]}`; `state.state` ∈ `unsupported`, `idle`, `connecting`, `writable`, `read-only`, `full`, `unreachable`, `auth-failed`, `host-key-unknown`, `host-key-changed`, `no-sftp`, `stale`, `no-medium`, `update-room`, `running`, `error` (`running` while a create/deliver run for it is active) |
-| `POST /restore/check` | power | multipart `file` (or raw body, or JSON `{target,name}`) → `{file, check: {ok, output, backup_version, running_version, needs_key, has_rega}, encryption: {encrypted, needs_recovery_key, created_here, …}}`; `422 corrupt`; one upload at a time |
-| `POST /restore/apply {file, key?, force?}` | power | `200 {ok, output, rebooting: true}` then reboot; `422 restore-failed`; `rebooting:false`+`message` when the reboot did not start; an `.sbk.age` is refused (400) until `/restore/decrypt` |
+| `POST /restore/check` | power | multipart `file` (or raw body, or JSON `{target,name}`) → `{file, check: {ok, output, backup_version, running_version, needs_key, has_rega}, encryption: {encrypted, needs_recovery_key, created_here, …}}`; `422 corrupt`; one upload at a time. Since occulited `8cf9060` (2026-11-10) the answer also carries `backup: null\|{kind: "openccu-lite"\|"ccu", system, version, …}` — what the file is a backup of, `null` for a file that is no archive. litefake decides `kind` by the `LITE=` line of the archive's `firmware_version` member alone and answers `system: "OpenCCU"` for every CCU backup (a simplification: the box also looks at the accounts file and names the firmware by the version's shape) |
+| `POST /restore/apply {file, key?, force?, confirm}` | power | `200 {ok, output, rebooting: true}` then reboot; `422 restore-failed`; `rebooting:false`+`message` when the reboot did not start; an `.sbk.age` is refused (400) until `/restore/decrypt`. Since occulited `6826b85` (2026-10-03) **`confirm: true` is required**: `400 confirm` without, before every other check. Since `8cf9060` a file that is not a backup of openccu-lite (a CCU's backup, or no archive) is refused with `422 not_openccu_lite` |
 | `GET /service-messages` | system:read | `{count, messages: [{interface, address (device), channel ("0"), key, value, since (RFC3339), seen: event\|start, type?}], swept, errors, feed?}`; read-only (no acknowledge); a message = a service-flagged datapoint active on channel 0; `/service-messages/stream` SSE `event: messages`, `: ping` every 30 s |
 | `GET /groups` | system:read | `{groups: [{id (**JSON number**, observed live 2026-09-28), name, type, type_label, device ("INT0000001"), ref ("VirtualDevices.INT0000001")}], devices_to_configure: [Member]}`; observed live 2026-10-03: `devices_to_configure` is `[]` here even right after a write that named members |
 | `GET /groups/types` | system:read | `{types: [{id, label, assignable: [Member], leftover: [Member]}]}` (types `HomeMatic.heating` label `Heating_Control`, `hmip.heating.group` label `HmIP-Heizungssteuerung`); observed live: `Member` = `{id: <channel address>, serial: <the same>, type: <channel type>}`. Observed live 2026-10-03: a channel that belongs to a group of the type is listed under `leftover`, every other candidate under `assignable` |
@@ -365,3 +374,33 @@ trees).
 
 ---
 
+## Additions after the appendix's pin
+
+The appendix above is reproduced as it was written, at occulited
+`24127692918f`. litefake also follows these later rules of the box, each
+named with the occulited commit that introduced it:
+
+- **Add-on notices** (`5783ccd`, 2026-10-27). `GET /api/system/v1/addon-notices`
+  → `{addon, max, notices: [{id, severity, title: {de, en}, text?, link?, expires?, posted, updated}]}`;
+  `PUT /addon-notices/{id}` with `{severity: "error"|"warning"|"info", title: {de, en}, text?, link?, ttl?}`
+  → `201` for a new notice, `200` for a replaced one whose `posted` stays; `DELETE /addon-notices/{id}`
+  → `{ok}`, `404 not_found` for one the add-on does not hold; `DELETE /addon-notices` → `{ok, cleared}`.
+  The routes are open: the credential is the add-on's **control token** as `Authorization: Bearer`,
+  `401 unauthenticated` without it or with an unknown one. An unknown field is `400`, a broken rule
+  `422 invalid` naming the field (id `a-z0-9._-`, at most 64, starting with a letter or digit; title at
+  most 160 and text at most 1000 characters, both languages; link an in-app path; ttl 0 to 366 days),
+  the twenty-first notice of an add-on `409 too-many`. litefake holds one add-on, `openccu-loom`; it
+  records `expires` and never lets a notice expire.
+- **`interfaces` in `/api/meta/v1/version`** (`9ee3588`, 2026-11-10): the names lite-rpc offers,
+  sorted, readable without a credential; absent on a box from before it.
+- **The paramset description route** (`2d9c804`, 2026-10-22). `POST /api/rpc/v1/paramsets/{interface}`
+  with `{addresses: [...], paramset?: "VALUES"}` (1 to 2000 addresses, channels or devices; scope
+  `rpc:read`) → `{keys: {"<address>": "<key>"}, paramsets: {"<key>": {<parameter>: {TYPE, OPERATIONS, …}}},
+  errors: {"<address>": "RPC fault (code: N, message: M)"}}`. A key is
+  `<interface>/<device type>/<firmware>/<version>/<channel type>/<paramset>`, the channel type empty for a
+  paramset of the device itself. An address the process does not know is in `errors`, not an error of the
+  request; `404 unknown-interface`, `503 down`, `400` for an empty or oversized list. Read from a box at
+  occulited `04ee7b6` on 2026-11-11: a channel maps to its key, a device address without `VALUES` is in
+  `errors` with fault -3, an unknown address with fault -2. litefake reads every description from its
+  interface process when it is asked and keeps no cache; it takes the key's version from the description of
+  the address asked, which the box's documents do not specify.
