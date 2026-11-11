@@ -233,6 +233,27 @@ func (f *Fake) publishDeviceChange(typ string, d devicesData) {
 	})
 }
 
+// firmwareData is the data of a firmware message: a device's firmware
+// update state as the interface last said it.
+type firmwareData struct {
+	Interface   string `json:"interface"`
+	Address     string `json:"address"`
+	UpdateState string `json:"update_state"`
+	TS          string `json:"ts"`
+}
+
+// PublishFirmware puts a firmware message on the stream: the device at
+// address on iface now reports updateState (an interface's
+// FIRMWARE_UPDATE_STATE word such as "READY_FOR_UPDATE"). The fake's
+// virtual CCU has no firmware transfers of its own, so a test says when
+// one moved.
+func (f *Fake) PublishFirmware(iface, address, updateState string) {
+	ts := time.Now().UTC().Format(time.RFC3339Nano)
+	f.ring.publish(typeFirmware, iface, address, "", func(uint64) []byte {
+		return mustJSON(firmwareData{Interface: iface, Address: address, UpdateState: updateState, TS: ts})
+	})
+}
+
 // interfaceData is the data of an interface message.
 type interfaceData struct {
 	Interface string `json:"interface"`

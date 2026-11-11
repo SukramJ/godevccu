@@ -194,6 +194,32 @@ func TestSystemUpdateStagesAndInstalls(t *testing.T) {
 	}
 }
 
+// TestSystemUpdateIsOneAtATime pins the busy rule: while a system update
+// is in flight the state names it, and download and install answer 409
+// busy with it as the detail; once it ends they work again.
+func TestSystemUpdateIsOneAtATime(t *testing.T) {
+	f := startSystemFake(t)
+	f.SetUpdateAvailable(&litefake.AvailableUpdate{Version: "1.1.0", Newer: true})
+	f.SetUpdateBusy(&litefake.UpdateBusy{Phase: "download", File: "openccu-lite-1.1.0.tar"})
+	_, raw := get(t, f, "/api/system/v1/system-update", litefake.DefaultToken)
+	if !strings.Contains(string(raw), `"busy":{"phase":"download","file":"openccu-lite-1.1.0.tar"}`) {
+		t.Errorf("update state does not name the update in flight: %s", raw)
+	}
+	for _, route := range []string{"download", "install"} {
+		resp, raw := send(t, f, http.MethodPost, "/api/system/v1/system-update/"+route, litefake.DefaultToken, `{}`)
+		if resp.StatusCode != http.StatusConflict || errorCode(t, raw) != "busy" || !strings.Contains(string(raw), `"phase":"download"`) {
+			t.Errorf("%s while busy: %d %s, want 409 busy with the phase", route, resp.StatusCode, raw)
+		}
+	}
+	f.SetUpdateBusy(nil)
+	if _, raw := get(t, f, "/api/system/v1/system-update", litefake.DefaultToken); !strings.Contains(string(raw), `"busy":null`) {
+		t.Errorf("update state after the update ended: %s", raw)
+	}
+	if resp, raw := send(t, f, http.MethodPost, "/api/system/v1/system-update/download", litefake.DefaultToken, `{}`); resp.StatusCode != http.StatusOK {
+		t.Errorf("download after the update ended: %d %s", resp.StatusCode, raw)
+	}
+}
+
 // groupCandidates are two channels the HmIP heating-group type can take,
 // in the shape a box lists them (channel address as id and as serial).
 func groupCandidates() map[string][]litefake.GroupMember {

@@ -126,6 +126,15 @@ type systemState struct {
 	restoreNeedsKey bool
 	backupTargets   []BackupTarget
 	applied         []string
+	// busy is the one system update in flight, nil for none.
+	busy *UpdateBusy
+}
+
+// UpdateBusy names the system update in flight: Phase is "download",
+// "upload" or "install", File the file it works on.
+type UpdateBusy struct {
+	Phase string `json:"phase"`
+	File  string `json:"file"`
 }
 
 // BackupTarget is one entry of /api/system/v1/backup/targets, reduced to
@@ -246,6 +255,7 @@ type updateAnswer struct {
 	Staged    *StagedUpdate  `json:"staged"`
 	Feed      *updateFeed    `json:"feed"`
 	Container string         `json:"container"`
+	Busy      *UpdateBusy    `json:"busy"`
 }
 
 func (f *Fake) handleUpdateGet(w http.ResponseWriter, _ *http.Request) {
@@ -254,6 +264,7 @@ func (f *Fake) handleUpdateGet(w http.ResponseWriter, _ *http.Request) {
 	ans := updateAnswer{
 		Running: runningVersion{Version: fakeRelease, Base: fakeBase, Lite: fakeRelease},
 		Staged:  s.staged,
+		Busy:    s.busy,
 	}
 	if s.available != nil {
 		a := *s.available
@@ -269,6 +280,10 @@ func (f *Fake) handleUpdateDownload(w http.ResponseWriter, _ *http.Request) {
 	s := f.system
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.busy != nil {
+		writeBusy(w, *s.busy)
+		return
+	}
 	if s.available == nil {
 		writeError(w, http.StatusConflict, "nothing-available", "the feed offers no release")
 		return
@@ -289,13 +304,34 @@ func (f *Fake) handleUpdateDownload(w http.ResponseWriter, _ *http.Request) {
 func (f *Fake) handleUpdateInstall(w http.ResponseWriter, _ *http.Request) {
 	s := f.system
 	s.mu.Lock()
-	staged := s.staged
+	staged, busy := s.staged, s.busy
 	s.mu.Unlock()
+	if busy != nil {
+		writeBusy(w, *busy)
+		return
+	}
 	if staged == nil {
 		writeError(w, http.StatusConflict, "nothing-staged", "no update is staged")
 		return
 	}
 	writeJSON(w, http.StatusOK, rebootAnswer{OK: true, Message: "rebooting"})
+}
+
+// writeBusy answers 409 busy with the update in flight as the error's
+// detail.
+func writeBusy(w http.ResponseWriter, b UpdateBusy) {
+	what := map[string]string{"download": "a download", "upload": "an upload", "install": "the install"}[b.Phase]
+	msg := what + " is running"
+	if b.File != "" {
+		msg += ": " + b.File
+	}
+	writeJSON(w, http.StatusConflict, busyError{Error: "busy", Message: msg, Detail: b})
+}
+
+type busyError struct {
+	Error   string     `json:"error"`
+	Message string     `json:"message"`
+	Detail  UpdateBusy `json:"detail"`
 }
 
 // rebootAnswer is the answer of the power actions.
@@ -564,6 +600,20 @@ func (f *Fake) SetUpdateAvailable(a *AvailableUpdate) {
 	}
 	c := *a
 	f.system.available = &c
+}
+
+// SetUpdateBusy puts a system update in flight: /system-update reports
+// it as busy, and download and install answer 409 busy with it. nil
+// ends it.
+func (f *Fake) SetUpdateBusy(b *UpdateBusy) {
+	f.system.mu.Lock()
+	defer f.system.mu.Unlock()
+	if b == nil {
+		f.system.busy = nil
+		return
+	}
+	c := *b
+	f.system.busy = &c
 }
 
 // SetRestoreNeedsRecoveryKey makes every archive the restore check sees

@@ -160,6 +160,13 @@ Use this appendix as the contract; do not consult occulited source.
     hint**; `replaceDevice` carries `[old, new]`. Since occulited `2fc25cb` (2026-10-02) the box
     passes on what the interface's call carried: `updateDevice` also has `hint` (as the interface
     sent it, 0 when the call had none), `replaceDevice` also `old` and `new`; litefake sends both.
+  - `firmware` (since occulited `11bed1d`, 2026-10-14): `interface`, `address`, `update_state`,
+    `transfer?`, `ts` — a device's firmware update state as the interface last said it; filtered by
+    `address` like an event, `key` does not apply. litefake sends it only when a test publishes one
+    and never carries `transfer`.
+  - Since occulited `7b69d5e` (2026-10-23) `GET /system-update` carries `busy: null|{phase, file}` and
+    `POST /system-update/download` and `/install` answer `409 busy` with `detail: {phase, file}` while
+    a download, an upload or an install runs. litefake checks it before every other refusal.
   - `resync`: `reason: boot|gap|overflow` (no id; sent regardless of filters).
 - **Value typing on the stream** (differs from the JSON-RPC path): `i4`/`int` → int (**parse failure →
   0 silently**); `boolean` → bool (`"1"`/`"true"`); `double` → float64 (**JSON writes `1.0` as `1`**);

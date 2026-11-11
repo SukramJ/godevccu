@@ -18,6 +18,13 @@ is excluded from the stability promise.
   device.** An `updateDevice` message carries `hint` as the interface
   sent it, a `replaceDevice` message `old` and `new` beside
   `addresses`, as the box does since occulited `2fc25cb`.
+- **litefake: the `firmware` stream message.** `PublishFirmware(iface,
+  address, updateState)` puts one on the stream; it is filtered by
+  address like an event (occulited `11bed1d`).
+- **litefake: one system update at a time.** `SetUpdateBusy` puts an
+  update in flight: `GET /system-update` reports it as `busy`, and
+  download and install answer `409 busy` with its phase and file as the
+  detail (occulited `7b69d5e`).
 
 ### Changed
 
