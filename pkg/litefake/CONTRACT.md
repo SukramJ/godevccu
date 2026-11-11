@@ -393,3 +393,14 @@ named with the occulited commit that introduced it:
   records `expires` and never lets a notice expire.
 - **`interfaces` in `/api/meta/v1/version`** (`9ee3588`, 2026-11-10): the names lite-rpc offers,
   sorted, readable without a credential; absent on a box from before it.
+- **The paramset description route** (`2d9c804`, 2026-10-22). `POST /api/rpc/v1/paramsets/{interface}`
+  with `{addresses: [...], paramset?: "VALUES"}` (1 to 2000 addresses, channels or devices; scope
+  `rpc:read`) → `{keys: {"<address>": "<key>"}, paramsets: {"<key>": {<parameter>: {TYPE, OPERATIONS, …}}},
+  errors: {"<address>": "RPC fault (code: N, message: M)"}}`. A key is
+  `<interface>/<device type>/<firmware>/<version>/<channel type>/<paramset>`, the channel type empty for a
+  paramset of the device itself. An address the process does not know is in `errors`, not an error of the
+  request; `404 unknown-interface`, `503 down`, `400` for an empty or oversized list. Read from a box at
+  occulited `04ee7b6` on 2026-11-11: a channel maps to its key, a device address without `VALUES` is in
+  `errors` with fault -3, an unknown address with fault -2. litefake reads every description from its
+  interface process when it is asked and keeps no cache; it takes the key's version from the description of
+  the address asked, which the box's documents do not specify.

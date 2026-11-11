@@ -55,6 +55,10 @@ const (
 	// DeviateVersionNoInterfaces leaves `interfaces` out of
 	// /api/meta/v1/version, as a box from before occulited 9ee3588 does.
 	DeviateVersionNoInterfaces Deviation = "version-no-interfaces"
+	// DeviateNoParamsetsRoute answers POST /api/rpc/v1/paramsets/… with
+	// the JSON 404 of an unknown API path, as a box from before occulited
+	// 2d9c804 does.
+	DeviateNoParamsetsRoute Deviation = "no-paramsets-route"
 )
 
 // Deviate switches a deviation on or off. Concurrency-safe; it applies

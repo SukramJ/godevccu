@@ -452,6 +452,7 @@ func (f *Fake) routes() http.Handler {
 	mux.HandleFunc("GET /api/rpc/v1/interfaces", f.handleInterfaces)
 	mux.HandleFunc("/api/rpc/v1/xmlrpc/{iface}", f.handleXMLRPC)
 	mux.HandleFunc("GET /api/rpc/v1/events", f.handleEvents)
+	mux.HandleFunc("POST /api/rpc/v1/paramsets/{iface}", f.handleParamsets)
 	mux.HandleFunc("GET /api/rpc/v1/state", f.handleState)
 	mux.HandleFunc("GET /api/auth/v1/state", f.handleAuthState)
 	mux.HandleFunc("GET /api/system/v1/health", f.handleHealth)

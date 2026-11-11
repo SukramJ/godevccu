@@ -33,6 +33,11 @@ is excluded from the stability promise.
   version document carries `interfaces`, the names lite-rpc offers,
   sorted (occulited `9ee3588`); `DeviateVersionNoInterfaces` leaves the
   member out, as a box from before it does.
+- **litefake: the paramset description route.** `POST
+  /api/rpc/v1/paramsets/{interface}` answers the descriptions of up to
+  2000 addresses at once as `{keys, paramsets, errors}`, each description
+  once by its key (occulited `2d9c804`); `DeviateNoParamsetsRoute`
+  answers 404, as a box from before the route does.
 - **litefake: one system update at a time.** `SetUpdateBusy` puts an
   update in flight: `GET /system-update` reports it as `busy`, and
   download and install answer `409 busy` with its phase and file as the
