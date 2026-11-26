@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // TestGetServiceMessagesUnit verifies that RPCFunctions.GetServiceMessages

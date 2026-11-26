@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SukramJ/godevccu/pkg/litefake"
+	"sukramj.dev/godevccu/pkg/litefake"
 )
 
 type paramsetsAnswer struct {

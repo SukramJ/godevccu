@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SukramJ/godevccu/internal/ccu"
-	"github.com/SukramJ/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/ccu"
+	"sukramj.dev/godevccu/internal/hmconst"
 )
 
 // newRPCWithLink returns an RPCFunctions loaded with HM-Sen-MDIR-WM55,

@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/binrpc"
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/regavm"
+	"sukramj.dev/godevccu/internal/binrpc"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/regavm"
 )
 
 // The ReGa script endpoint.

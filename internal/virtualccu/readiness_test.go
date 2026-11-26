@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/virtualccu"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/virtualccu"
 )
 
 // startCCUNotReady spins up a VirtualCCU that boots in its "still warming up"

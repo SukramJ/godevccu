@@ -6,7 +6,7 @@ package converter_test
 import (
 	"testing"
 
-	"github.com/SukramJ/godevccu/internal/converter"
+	"sukramj.dev/godevccu/internal/converter"
 )
 
 // ─────────────────────────────────────────────────────────────────

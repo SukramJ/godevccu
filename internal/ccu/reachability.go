@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/hmconst"
 )
 
 // Device state machines a CCU runs and the simulator did not.

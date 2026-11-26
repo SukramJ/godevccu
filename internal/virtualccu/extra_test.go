@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/virtualccu"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/virtualccu"
 )
 
 // startEphemeral spins up a VirtualCCU using ephemeral ports.

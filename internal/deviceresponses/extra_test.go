@@ -6,7 +6,7 @@ package deviceresponses_test
 import (
 	"testing"
 
-	"github.com/SukramJ/godevccu/internal/deviceresponses"
+	"sukramj.dev/godevccu/internal/deviceresponses"
 )
 
 // ─────────────────────────────────────────────────────────────────

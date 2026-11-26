@@ -11,7 +11,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // WriteRequest frames a single BIN-RPC request to w.

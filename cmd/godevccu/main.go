@@ -24,8 +24,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/SukramJ/godevccu/pkg/godevccu"
-	"github.com/SukramJ/godevccu/pkg/litefake"
+	"sukramj.dev/godevccu/pkg/godevccu"
+	"sukramj.dev/godevccu/pkg/litefake"
 )
 
 func main() {

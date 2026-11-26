@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SukramJ/godevccu/pkg/litefake"
+	"sukramj.dev/godevccu/pkg/litefake"
 )
 
 const noticeBody = `{"severity":"warning","title":{"de":"Broker weg","en":"Broker gone"}}`

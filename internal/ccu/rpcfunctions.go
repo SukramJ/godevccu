@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/converter"
-	"github.com/SukramJ/godevccu/internal/deviceresponses"
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/converter"
+	"sukramj.dev/godevccu/internal/deviceresponses"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // ErrRPC is the simulator-side error. It is the equivalent of pydevccu's

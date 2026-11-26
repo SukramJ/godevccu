@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/SukramJ/godevccu/internal/state"
+	"sukramj.dev/godevccu/internal/state"
 )
 
 // RPC is the subset of the simulator's XML-RPC surface that the engine

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // Proxy limits and timings of the lite-rpc XML-RPC proxy.

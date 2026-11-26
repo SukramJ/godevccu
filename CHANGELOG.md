@@ -9,6 +9,14 @@ is excluded from the stability promise.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-26
+
+### Changed
+
+- **Breaking:** the module path is now `sukramj.dev/godevccu` (was
+  `github.com/SukramJ/godevccu`). Update imports and `go.mod`; the vanity
+  path resolves to the same repository.
+
 ## [0.12.0] — 2026-11-12
 
 ### Added

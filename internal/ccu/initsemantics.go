@@ -7,8 +7,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // init() as the interface processes handle it.

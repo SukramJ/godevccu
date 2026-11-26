@@ -15,8 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/devicelogic"
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/devicelogic"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // Server is the threaded XML-RPC server wrapping [RPCFunctions]. It is

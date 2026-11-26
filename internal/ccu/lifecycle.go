@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/hmconst"
 )
 
 // System lifecycle automata.

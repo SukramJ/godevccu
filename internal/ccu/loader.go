@@ -13,7 +13,7 @@ import (
 	"io/fs"
 	"strings"
 
-	emb "github.com/SukramJ/godevccu/internal/embed"
+	emb "sukramj.dev/godevccu/internal/embed"
 )
 
 // loadedDeviceSet groups everything we get from a single

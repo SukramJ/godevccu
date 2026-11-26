@@ -6,7 +6,7 @@ package ccu
 import (
 	"strings"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/hmconst"
 )
 
 // Load-time data normalisation.

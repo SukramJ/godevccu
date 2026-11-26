@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/devicelogic"
+	"sukramj.dev/godevccu/internal/devicelogic"
 )
 
 // ─────────────────────────────────────────────────────────────────

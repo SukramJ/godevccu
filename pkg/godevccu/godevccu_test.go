@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/pkg/godevccu"
+	"sukramj.dev/godevccu/pkg/godevccu"
 )
 
 // ─────────────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/ssdp"
+	"sukramj.dev/godevccu/internal/ssdp"
 )
 
 const (

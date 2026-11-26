@@ -6,7 +6,7 @@ package hmconst_test
 import (
 	"testing"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/hmconst"
 )
 
 // TestInterfaceForType pins the classification the multi-interface

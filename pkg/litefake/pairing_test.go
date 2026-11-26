@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/pkg/litefake"
+	"sukramj.dev/godevccu/pkg/litefake"
 )
 
 // clientNonce is a fixed 16-byte client nonce and its commit.

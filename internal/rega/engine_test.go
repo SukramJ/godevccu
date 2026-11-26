@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/rega"
-	"github.com/SukramJ/godevccu/internal/state"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/rega"
+	"sukramj.dev/godevccu/internal/state"
 )
 
 func TestExecuteBackendInfo(t *testing.T) {

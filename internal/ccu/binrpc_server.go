@@ -9,8 +9,8 @@ import (
 	"net"
 	"sync"
 
-	"github.com/SukramJ/godevccu/internal/binrpc"
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/binrpc"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // binrpcState holds the optional BIN-RPC listener. It is separate from

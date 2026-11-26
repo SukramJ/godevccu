@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/deviceresponses"
-	"github.com/SukramJ/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/deviceresponses"
+	"sukramj.dev/godevccu/internal/hmconst"
 )
 
 // Actuator ramps.

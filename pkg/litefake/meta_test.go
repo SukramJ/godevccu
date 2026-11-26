@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/pkg/litefake"
+	"sukramj.dev/godevccu/pkg/litefake"
 )
 
 func startMetaFake(t *testing.T) *litefake.Fake {

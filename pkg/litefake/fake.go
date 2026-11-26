@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/SukramJ/godevccu/pkg/godevccu"
+	"sukramj.dev/godevccu/pkg/godevccu"
 )
 
 // Defaults for [Options]. The stream figures are the ones the box

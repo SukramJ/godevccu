@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
-	"github.com/SukramJ/godevccu/pkg/litefake"
+	"sukramj.dev/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/pkg/litefake"
 )
 
 const (
