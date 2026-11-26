@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SukramJ/godevccu/internal/regavm"
+	"sukramj.dev/godevccu/internal/regavm"
 )
 
 // fakeSource is a small object model to run scripts against.

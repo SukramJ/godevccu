@@ -10,10 +10,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/ccu"
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/jsonrpc"
-	"github.com/SukramJ/godevccu/internal/ssdp"
+	"sukramj.dev/godevccu/internal/ccu"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/jsonrpc"
+	"sukramj.dev/godevccu/internal/ssdp"
 )
 
 // Separate interface listeners.

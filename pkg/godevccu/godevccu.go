@@ -9,12 +9,12 @@ package godevccu
 import (
 	"maps"
 
-	"github.com/SukramJ/godevccu/internal/ccu"
-	"github.com/SukramJ/godevccu/internal/devicelogic"
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/state"
-	"github.com/SukramJ/godevccu/internal/virtualccu"
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/ccu"
+	"sukramj.dev/godevccu/internal/devicelogic"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/state"
+	"sukramj.dev/godevccu/internal/virtualccu"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // Re-export the protocol constants so callers do not need to reach

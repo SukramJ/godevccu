@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/session"
-	"github.com/SukramJ/godevccu/internal/state"
+	"sukramj.dev/godevccu/internal/session"
+	"sukramj.dev/godevccu/internal/state"
 )
 
 // DefaultRequestLimit caps the body size in bytes.

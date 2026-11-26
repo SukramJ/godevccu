@@ -24,10 +24,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/binrpc"
-	"github.com/SukramJ/godevccu/internal/ccu"
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/binrpc"
+	"sukramj.dev/godevccu/internal/ccu"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

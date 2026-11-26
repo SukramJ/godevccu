@@ -11,7 +11,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // Request is the parsed form of a BIN-RPC request.

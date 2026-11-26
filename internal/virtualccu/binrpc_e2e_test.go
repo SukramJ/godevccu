@@ -21,9 +21,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/binrpc"
-	"github.com/SukramJ/godevccu/internal/virtualccu"
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/binrpc"
+	"sukramj.dev/godevccu/internal/virtualccu"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // callbackSink is a BIN-RPC listener standing in for a consumer's

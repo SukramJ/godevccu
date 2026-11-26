@@ -10,7 +10,7 @@ package state
 import (
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/hmconst"
 )
 
 // BackendInfo carries the strings the JSON-RPC backend exposes via

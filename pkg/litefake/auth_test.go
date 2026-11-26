@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SukramJ/godevccu/pkg/litefake"
+	"sukramj.dev/godevccu/pkg/litefake"
 )
 
 // TestFakeAuthStateReportsStoredScopes pins /api/auth/v1/state: open,

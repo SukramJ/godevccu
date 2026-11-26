@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // The paramset description route.

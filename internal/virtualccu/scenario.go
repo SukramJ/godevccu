@@ -11,7 +11,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/ccu"
+	"sukramj.dev/godevccu/internal/ccu"
 )
 
 // Scenario API.

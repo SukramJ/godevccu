@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/SukramJ/godevccu/internal/ccu"
-	"github.com/SukramJ/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/ccu"
+	"sukramj.dev/godevccu/internal/hmconst"
 )
 
 func newRPC(t *testing.T) *ccu.RPCFunctions {

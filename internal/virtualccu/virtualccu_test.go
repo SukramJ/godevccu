@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/virtualccu"
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/virtualccu"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // startCCU spins up a VirtualCCU on an ephemeral port pair and returns

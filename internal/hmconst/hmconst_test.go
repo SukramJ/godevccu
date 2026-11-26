@@ -6,7 +6,7 @@ package hmconst_test
 import (
 	"testing"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/hmconst"
 )
 
 // TestBackendModeString verifies that every defined BackendMode value

@@ -30,7 +30,7 @@ import (
     "os/signal"
     "syscall"
 
-    "github.com/SukramJ/godevccu/pkg/godevccu"
+    "sukramj.dev/godevccu/pkg/godevccu"
 )
 
 func main() {

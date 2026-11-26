@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/ccu"
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/jsonrpc"
-	"github.com/SukramJ/godevccu/internal/rega"
-	"github.com/SukramJ/godevccu/internal/session"
-	"github.com/SukramJ/godevccu/internal/state"
+	"sukramj.dev/godevccu/internal/ccu"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/jsonrpc"
+	"sukramj.dev/godevccu/internal/rega"
+	"sukramj.dev/godevccu/internal/session"
+	"sukramj.dev/godevccu/internal/state"
 )
 
 // ─────────────────────────────────────────────────────────────────

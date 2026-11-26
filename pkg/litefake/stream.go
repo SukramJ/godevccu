@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // streamWriteDeadline bounds every write to an event stream.

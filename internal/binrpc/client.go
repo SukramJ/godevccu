@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // URLScheme is the prefix a BIN-RPC callback address carries. Every

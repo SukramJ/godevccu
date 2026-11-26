@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/session"
+	"sukramj.dev/godevccu/internal/session"
 )
 
 func TestAge(t *testing.T) {

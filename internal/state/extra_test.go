@@ -6,8 +6,8 @@ package state_test
 import (
 	"testing"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/state"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/state"
 )
 
 // ─────────────────────────────────────────────────────────────────

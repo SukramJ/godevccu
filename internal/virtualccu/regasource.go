@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/ccu"
-	"github.com/SukramJ/godevccu/internal/hmconst"
-	"github.com/SukramJ/godevccu/internal/regavm"
-	"github.com/SukramJ/godevccu/internal/state"
+	"sukramj.dev/godevccu/internal/ccu"
+	"sukramj.dev/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/regavm"
+	"sukramj.dev/godevccu/internal/state"
 )
 
 // regaSource exposes the simulator's state as the ReGa object model.

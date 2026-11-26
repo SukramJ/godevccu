@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/hmconst"
+	"sukramj.dev/godevccu/internal/hmconst"
 )
 
 // SysVarCallback is fired when a system variable value changes.

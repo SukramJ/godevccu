@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/ccu"
+	"sukramj.dev/godevccu/internal/ccu"
 )
 
 // eventRecorder collects events fired into the in-process callbacks.

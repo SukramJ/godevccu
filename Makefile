@@ -11,7 +11,7 @@ export CGO_ENABLED := 0
 BIN_DIR  := bin
 BIN_NAME := godevccu
 BIN      := $(BIN_DIR)/$(BIN_NAME)
-MODULE   := github.com/SukramJ/godevccu
+MODULE   := sukramj.dev/godevccu
 
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // ─────────────────────────────────────────────────────────────────

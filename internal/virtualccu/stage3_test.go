@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SukramJ/godevccu/internal/ccu"
-	"github.com/SukramJ/godevccu/internal/virtualccu"
-	"github.com/SukramJ/godevccu/internal/xmlrpc"
+	"sukramj.dev/godevccu/internal/ccu"
+	"sukramj.dev/godevccu/internal/virtualccu"
+	"sukramj.dev/godevccu/internal/xmlrpc"
 )
 
 // runScript posts a script to the /tclrega.exe endpoint and returns the
